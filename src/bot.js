@@ -283,15 +283,7 @@ function getGroupMenuText() {
 function getGroupKeyboard() {
   return {
     reply_markup: {
-      keyboard: [
-        ["/profile", "/rules"],
-        ["/warn", "/unwarn"],
-        ["/mute", "/unmute"],
-        ["/ban", "/unban"],
-        ["/clear", "/menu"]
-      ],
-      resize_keyboard: true,
-      one_time_keyboard: false
+      remove_keyboard: true
     }
   };
 }
@@ -773,7 +765,7 @@ bot.onText(/\/unban/, async (msg) => {
   }
 });
 
-bot.onText(/\/(clear|claer)/, async (msg) => {
+bot.onText(/\/(clear|claer)(?:\s+(\d+))?/, async (msg, match) => {
   registerUserInChat(msg);
 
   if (isPrivateChat(msg)) {
@@ -788,13 +780,31 @@ bot.onText(/\/(clear|claer)/, async (msg) => {
     return;
   }
 
-  if (!msg.reply_to_message) {
-    bot.sendMessage(msg.chat.id, "🧹 Чтобы очистить сообщения, ответь командой /clear на сообщение, с которого нужно начать удаление.");
+  if (!match[2]) {
+    bot.sendMessage(
+      msg.chat.id,
+      "🧹 Укажите количество сообщений для удаления.\n\nПример:\n/clear 10 — удалить последние 10 сообщений\n/clear 20 — удалить последние 20 сообщений"
+    );
     return;
   }
 
-  const fromMessageId = msg.reply_to_message.message_id;
-  const toMessageId = msg.message_id;
+  const count = Number(match[2]);
+
+  if (!Number.isInteger(count) || count < 1) {
+    bot.sendMessage(
+      msg.chat.id,
+      "🧹 Используй команду так:\n\n/clear — удалить последнее сообщение\n/clear 10 — удалить последние 10 сообщений\n/clear 20 — удалить последние 20 сообщений"
+    );
+    return;
+  }
+
+  if (count > 100) {
+    bot.sendMessage(msg.chat.id, "⚠️ За один раз можно удалить максимум 100 сообщений.");
+    return;
+  }
+
+  const fromMessageId = Math.max(1, msg.message_id - count);
+  const toMessageId = msg.message_id - 1;
   let deletedCount = 0;
 
   for (let messageId = fromMessageId; messageId <= toMessageId; messageId++) {
@@ -809,11 +819,7 @@ bot.onText(/\/(clear|claer)/, async (msg) => {
     return;
   }
 
-  const infoMessage = await bot.sendMessage(msg.chat.id, `🧹 Удалено сообщений: ${deletedCount}`);
-
-  setTimeout(() => {
-    bot.deleteMessage(msg.chat.id, infoMessage.message_id).catch(() => {});
-  }, 3000);
+  bot.sendMessage(msg.chat.id, `🧹 Удалено сообщений: ${deletedCount}`);
 });
 
 bot.on("message", (msg) => {
