@@ -1,0 +1,14 @@
+{
+  "name": "slivki",
+  "version": "1.0.0",
+  "description": "Telegram AI Bot",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "node-telegram-bot-api": "^0.67.0",
+    "openai": "^6.39.1"
+  }
+}
