@@ -3,6 +3,10 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 
 const botToken = process.env.BOT_TOKEN;
+const ownerIds = (process.env.OWNER_IDS || "")
+  .split(",")
+  .map((id) => Number(id.trim()))
+  .filter((id) => Number.isInteger(id));
 
 if (!botToken) {
   console.error("Ошибка: BOT_TOKEN не найден в файле .env");
@@ -15,8 +19,8 @@ console.log("🍦 Сливки Бот запущен");
 
 const users = new Map();
 const chatUsers = new Map();
-const chatRules = new Map();
 const muteTimers = new Map();
+const adminLogs = new Map();
 
 let botUsername = "";
 
@@ -24,76 +28,40 @@ bot.getMe().then((me) => {
   botUsername = me.username;
 });
 
-const DEFAULT_RULES = `ОБЯЗАТЕЛЬНО‼️‼️‼️
-
-К ознакомлению
-
-Привет! После вступления в чат тебе нужно ознакомиться с правилами, чтобы избежать возможного бана, мута, кика и недопониманий.
-
-Правила:
-
-1.1 Запрещено обсуждать, отправлять, транслировать и пропагандировать незаконный, опасный, шокирующий и запрещённый контент.
-
-1.2 Запрещены любые действия, сообщения и материалы, связанные с вовлечением несовершеннолетних в опасные или запрещённые темы.
-
-1.3 Запрещены дискриминация, разжигание агрессии и негативные высказывания по этническому, социальному, расовому, национальному, религиозному или половому признаку.
-
-1.4 Запрещены политические обсуждения в любом ключе.
-
-1.5 Запрещено распространять личную информацию без согласия владельца.
-
-1.6 Запрещена продажа и реклама аккаунтов, каналов, товаров, услуг, а также выпрашивание денежных средств.
-
-1.7 Запрещены действия против развития чата, призывы покинуть чат и обман администрации.
-
-1.8 Запрещены неадекватное поведение, чрезмерная агрессия, буллинг, оскорбления, токсичность и разжигание конфликтов.
-
-1.9 Запрещено иметь второй аккаунт в чате, если первый аккаунт находится в бане.
-
-1.10 Запрещено выдавать себя за другую личность.
-
-1.11 Запрещены спам, флуд и КАПС в больших количествах.
-
-1.12 Запрещены действия и сообщения, которые нарушают законодательство.
-
-1.13 В чате запрещён ИИ-контент.
-
-Вход только 16+.
-
-Если нет ника, скрыт username или нет аватарки, заявка может быть отклонена.
-
-После вступления в чат сразу отправь свой username с ИТД, иначе возможен кик.
-
-Админы сливок в ИТД — обязательно подписаться.`;
 
 async function setupBotCommands() {
   try {
-    await bot.setMyCommands(
-      [
-        { command: "start", description: "🍦 Запустить бота" },
-        { command: "menu", description: "📋 Открыть меню" },
-        { command: "help", description: "ℹ️ Помощь" },
-        { command: "profile", description: "👤 Профиль" },
-        { command: "rules", description: "📌 Правила группы" },
-        { command: "warn", description: "⚠️ Выдать предупреждение" },
-        { command: "unwarn", description: "♻️ Снять предупреждения" },
-        { command: "mute", description: "🔇 Замьютить пользователя" },
-        { command: "unmute", description: "🔊 Снять мут" },
-        { command: "ban", description: "🚫 Забанить пользователя" },
-        { command: "unban", description: "✅ Разбанить пользователя" },
-        { command: "clear", description: "🧹 Очистить сообщения" }
-      ],
-      { scope: { type: "all_group_chats" } }
-    );
+    const groupCommands = [
+      { command: "start", description: "🍦 запуск бота" },
+      { command: "menu", description: "📋 меню" },
+      { command: "commands", description: "📜 все команды" },
+      { command: "profile", description: "👤 профиль" },
+      { command: "admins", description: "👑 список администраторов" },
+      { command: "slowmode", description: "🐢 задержка сообщений" },
+      { command: "lock", description: "🔒 закрыть чат" },
+      { command: "unlock", description: "🔓 открыть чат" },
+      { command: "logs", description: "📋 логи админ-действий" },
+      { command: "warn", description: "⚠️ предупреждение" },
+      { command: "unwarn", description: "♻️ снять предупреждения" },
+      { command: "mute", description: "🔇 мут" },
+      { command: "unmute", description: "🔊 снять мут" },
+      { command: "kick", description: "👢 кик" },
+      { command: "ban", description: "🚫 бан" },
+      { command: "unban", description: "✅ разбан" }
+    ];
 
-    await bot.setMyCommands(
-      [
-        { command: "start", description: "🍦 Добавить бота в группу" },
-        { command: "rules", description: "📌 Создать правила" },
-        { command: "help", description: "ℹ️ Помощь" }
-      ],
-      { scope: { type: "all_private_chats" } }
-    );
+    const privateCommands = [
+      { command: "start", description: "🍦 добавить бота в группу" }
+    ];
+
+    await bot.deleteMyCommands();
+    await bot.deleteMyCommands({ scope: { type: "all_group_chats" } });
+    await bot.deleteMyCommands({ scope: { type: "all_chat_administrators" } });
+    await bot.deleteMyCommands({ scope: { type: "all_private_chats" } });
+
+    await bot.setMyCommands(groupCommands, { scope: { type: "all_group_chats" } });
+    await bot.setMyCommands(groupCommands, { scope: { type: "all_chat_administrators" } });
+    await bot.setMyCommands(privateCommands, { scope: { type: "all_private_chats" } });
   } catch (error) {
     console.error("Ошибка меню команд:", error.message);
   }
@@ -150,8 +118,96 @@ function getUserDisplayName(profile) {
   if (profile.username && profile.username !== "нет") {
     return `@${profile.username}`;
   }
-
   return profile.firstName || `ID:${profile.id}`;
+}
+
+function getStatusLabel(status) {
+  if (status === "creator") return "Владелец";
+  if (status === "administrator") return "Админ";
+  if (status === "member") return "Участник";
+  if (status === "restricted") return "Ограничен";
+  if (status === "left") return "Покинул группу";
+  if (status === "kicked") return "Забанен";
+  return "Неизвестно";
+}
+
+function getUserTag(user) {
+  if (!user) return "Неизвестно";
+  if (user.username) return `@${user.username}`;
+  return `ID:${user.id}`;
+}
+
+function getFullName(user) {
+  if (!user) return "Пользователь";
+  const firstName = user.first_name || "";
+  const lastName = user.last_name || "";
+  const fullName = `${firstName} ${lastName}`.trim();
+  return fullName || "Пользователь";
+}
+
+function formatUnixDate(unixTime) {
+  if (!unixTime) return "Telegram не показывает";
+
+  const date = new Date(unixTime * 1000);
+  const months = [
+    "янв", "фев", "мар", "апр", "мая", "июн",
+    "июл", "авг", "сен", "окт", "ноя", "дек"
+  ];
+
+  const day = date.getDate();
+  const month = months[date.getMonth()];
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${day} ${month} ${year} г., ${hours}:${minutes}`;
+}
+
+function formatDateTime(date = new Date()) {
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = date.getFullYear();
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${day}.${month}.${year} ${hours}:${minutes}`;
+}
+
+function addAdminLog(chatId, action, adminUser, targetText, details = "") {
+  if (!adminLogs.has(chatId)) {
+    adminLogs.set(chatId, []);
+  }
+
+  const logs = adminLogs.get(chatId);
+
+  logs.unshift({
+    date: formatDateTime(),
+    action,
+    admin: getTelegramName(adminUser),
+    target: targetText,
+    details
+  });
+
+  if (logs.length > 50) {
+    logs.length = 50;
+  }
+}
+
+function getAdminLogsText(chatId) {
+  const logs = adminLogs.get(chatId) || [];
+
+  if (logs.length === 0) {
+    return "📋 Логи пока пустые.";
+  }
+
+  return "📋 Последние админ-действия:\n\n" + logs
+    .slice(0, 15)
+    .map((log, index) => {
+      const detailsText = log.details ? `\n   📝 ${log.details}` : "";
+
+      return `${index + 1}. ${log.action}\n   🕒 ${log.date}\n   👮 Админ: ${log.admin}\n   👤 Цель: ${log.target}${detailsText}`;
+    })
+    .join("\n\n");
 }
 
 function findUserByUsername(username) {
@@ -202,6 +258,122 @@ async function isUserAdmin(chatId, userId) {
   } catch {
     return false;
   }
+}
+
+function isOwner(userId) {
+  return ownerIds.includes(Number(userId));
+}
+
+async function canUseAdminCommands(chatId, userId) {
+  if (isOwner(userId)) return true;
+  return isUserAdmin(chatId, userId);
+}
+
+// Check if the bot has rights to change slowmode in the chat
+async function canBotChangeSlowMode(chatId) {
+  try {
+    const me = await bot.getMe();
+    const botMember = await bot.getChatMember(chatId, me.id);
+
+    return (
+      botMember.status === "administrator" &&
+      botMember.can_restrict_members === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function getChatPermissionsWithSlowMode(chatId, seconds) {
+  try {
+    const chat = await bot.getChat(chatId);
+    const currentPermissions = chat.permissions || {};
+
+    return {
+      can_send_messages: currentPermissions.can_send_messages !== false,
+      can_send_audios: currentPermissions.can_send_audios !== false,
+      can_send_documents: currentPermissions.can_send_documents !== false,
+      can_send_photos: currentPermissions.can_send_photos !== false,
+      can_send_videos: currentPermissions.can_send_videos !== false,
+      can_send_video_notes: currentPermissions.can_send_video_notes !== false,
+      can_send_voice_notes: currentPermissions.can_send_voice_notes !== false,
+      can_send_polls: currentPermissions.can_send_polls !== false,
+      can_send_other_messages: currentPermissions.can_send_other_messages !== false,
+      can_add_web_page_previews: currentPermissions.can_add_web_page_previews !== false,
+      can_change_info: currentPermissions.can_change_info === true,
+      can_invite_users: currentPermissions.can_invite_users !== false,
+      can_pin_messages: currentPermissions.can_pin_messages === true,
+      can_manage_topics: currentPermissions.can_manage_topics === true,
+      slow_mode_delay: seconds
+    };
+  } catch {
+    return {
+      can_send_messages: true,
+      can_send_audios: true,
+      can_send_documents: true,
+      can_send_photos: true,
+      can_send_videos: true,
+      can_send_video_notes: true,
+      can_send_voice_notes: true,
+      can_send_polls: true,
+      can_send_other_messages: true,
+      can_add_web_page_previews: true,
+      can_change_info: false,
+      can_invite_users: true,
+      can_pin_messages: false,
+      can_manage_topics: false,
+      slow_mode_delay: seconds
+    };
+  }
+}
+
+async function getCurrentSlowModeDelay(chatId) {
+  try {
+    const chat = await bot.getChat(chatId);
+    return chat.slow_mode_delay || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function getLockedChatPermissions(slowModeDelay = 0) {
+  return {
+    can_send_messages: false,
+    can_send_audios: false,
+    can_send_documents: false,
+    can_send_photos: false,
+    can_send_videos: false,
+    can_send_video_notes: false,
+    can_send_voice_notes: false,
+    can_send_polls: false,
+    can_send_other_messages: false,
+    can_add_web_page_previews: false,
+    can_change_info: false,
+    can_invite_users: true,
+    can_pin_messages: false,
+    can_manage_topics: false,
+    slow_mode_delay: slowModeDelay
+  };
+}
+
+function getUnlockedChatPermissions(slowModeDelay = 0) {
+  return {
+    can_send_messages: true,
+    can_send_audios: true,
+    can_send_documents: true,
+    can_send_photos: true,
+    can_send_videos: true,
+    can_send_video_notes: true,
+    can_send_voice_notes: true,
+    can_send_polls: true,
+    can_send_other_messages: true,
+    can_add_web_page_previews: true,
+    can_change_info: false,
+    can_invite_users: true,
+    can_pin_messages: false,
+    can_manage_topics: false,
+    slow_mode_delay: slowModeDelay
+  };
 }
 
 function addActivity(user) {
@@ -268,16 +440,46 @@ function getFullPermissions() {
 }
 
 function getGroupMenuText() {
-  return "🍦 Меню Сливки Бот\n\n" +
-    "👤 /profile — профиль пользователя\n" +
-    "📌 /rules — правила группы\n" +
+  return "🍦 Сливки Бот\n\n" +
+    "📋 Главное меню\n" +
+    "👤 Профиль: /profile\n" +
+    "🛡 Модерация: /commands\n\n" +
+    "✨ Быстрые действия\n" +
     "⚠️ /warn — предупреждение\n" +
-    "♻️ /unwarn — снять предупреждения\n" +
-    "🔇 /mute — мут пользователя\n" +
-    "🔊 /unmute — снять мут\n" +
-    "🚫 /ban — бан пользователя\n" +
-    "✅ /unban — разбан пользователя\n" +
-    "🧹 /clear — очистка сообщений";
+    "🔇 /mute 10m — мут\n" +
+    "👢 /kick — кик\n" +
+    "🚫 /ban — бан\n\n" +
+    "📜 Полный список команд: /commands";
+}
+
+function getCommandsText() {
+  return "📜 Commands • Список команд\n\n" +
+    "👤 Пользователь\n" +
+    "• /profile — профиль пользователя\n\n" +
+    "📌 Информация\n" +
+    "• /menu — главное меню\n" +
+    "• /commands — список команд\n" +
+    "• /admins — список администраторов\n" +
+    "• /slowmode 10 — задержка сообщений\n" +
+    "• /lock — закрыть чат\n" +
+    "• /unlock — открыть чат\n" +
+    "• /logs — логи админ-действий\n\n" +
+    "🛡 Модерация\n" +
+    "• /warn — выдать предупреждение\n" +
+    "• /unwarn — снять предупреждения\n" +
+    "• /mute 10m — выдать мут\n" +
+    "• /unmute — снять мут\n" +
+    "• /kick — кикнуть пользователя\n" +
+    "• /ban — забанить пользователя\n" +
+    "• /unban — разбанить пользователя\n\n" +
+    "🧩 Использование\n" +
+    "↩️ Ответом на сообщение\n" +
+    "🏷 Через @username\n" +
+    "🆔 Через ID\n\n" +
+    "✨ Примеры\n" +
+    "/mute @username 10m\n" +
+    "/warn ID\n" +
+    "/kick @username";
 }
 
 function getGroupKeyboard() {
@@ -300,7 +502,7 @@ bot.onText(/\/start/, async (msg) => {
 
     bot.sendMessage(
       msg.chat.id,
-      "🍦 Привет! Я «Сливки Бот»\n\nЧтобы активировать мои команды, добавь меня в группу и дай права администратора.\n\nВ группе доступны:\n\n👤 профиль пользователя;\n\n⛑ инструменты для модерации;\n\n⚠️ предупреждения пользователей;\n\n🔇 мут и снятие мута;\n\n🚫 бан и разбан участников;\n\n📋 удобное меню команд;\n\n📌 свои правила для группы;\n\n👋 уведомления о входе и выходе участников;",
+      "🍦 Привет! Я «Сливки Бот»\n\nЧтобы активировать мои команды, добавь меня в группу и дай права администратора.\n\nВ группе доступны:\n\n👤 профиль пользователя;\n\n⛑ инструменты для модерации;\n\n⚠️ предупреждения пользователей;\n\n🔇 мут и снятие мута;\n\n🚫 бан и разбан участников;\n\n📋 удобное меню команд;\n\n👋 уведомления о входе и выходе участников;",
       {
         reply_markup: {
           inline_keyboard: [
@@ -341,7 +543,7 @@ bot.onText(/\/help/, (msg) => {
   if (isPrivateChat(msg)) {
     bot.sendMessage(
       msg.chat.id,
-      "ℹ️ Чтобы пользоваться командами, добавь меня в группу.\n\n📌 Для настройки правил напиши:\n/rules твой текст правил"
+      "ℹ️ Чтобы пользоваться командами, добавь меня в группу."
     );
     return;
   }
@@ -349,7 +551,18 @@ bot.onText(/\/help/, (msg) => {
   bot.sendMessage(msg.chat.id, getGroupMenuText(), getGroupKeyboard());
 });
 
-bot.onText(/\/profile/, (msg) => {
+bot.onText(/\/commands/, (msg) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "📜 Добавь меня в группу, чтобы посмотреть команды.");
+    return;
+  }
+
+  bot.sendMessage(msg.chat.id, getCommandsText(), getGroupKeyboard());
+});
+
+bot.onText(/\/profile/, async (msg) => {
   registerUserInChat(msg);
 
   if (isPrivateChat(msg)) {
@@ -357,93 +570,240 @@ bot.onText(/\/profile/, (msg) => {
     return;
   }
 
-  const profile = getUser(msg.from);
+  const targetUser = msg.reply_to_message?.from || msg.from;
+  const profile = getUser(targetUser);
 
-  bot.sendMessage(
-    msg.chat.id,
-    `👤 Профиль пользователя\n\nИмя: ${profile.firstName}\nUsername: @${profile.username}\nID: ${profile.id}\nСообщений: ${profile.messages}\nПредупреждения: ${profile.warnings}/3`
-  );
+  let memberStatus = "unknown";
+  let joinedDate = "Telegram не показывает";
+
+  try {
+    const member = await bot.getChatMember(msg.chat.id, targetUser.id);
+    memberStatus = member.status;
+    joinedDate = formatUnixDate(member.joined_date);
+  } catch {}
+
+  const usernameText = targetUser.username ? `@${targetUser.username}` : "Отсутствует";
+  const tagText = getUserTag(targetUser);
+  const statusText = getStatusLabel(memberStatus);
+  const fullName = getFullName(targetUser);
+
+  const profileText =
+    `🍦 «СЛИВКИ» • профиль пользователя\n\n` +
+    `🆔 ID: ${targetUser.id}\n` +
+    `🔎 Хэштег: #id${targetUser.id}\n\n` +
+    `👤 Имя: ${fullName}\n` +
+    `🌐 Username: ${usernameText}\n` +
+    `🏷 Тег: ${tagText}\n\n` +
+    `👀 Статус в группе: ${statusText}\n` +
+    `↘️ Вступил(а): ${joinedDate}\n\n` +
+    `💬 Сообщений: ${profile.messages}\n` +
+    `⚠️ Предупреждения: ${profile.warnings}/3`;
+
+  bot.sendMessage(msg.chat.id, profileText);
 });
 
-bot.onText(/\/rules(?:\s+([\s\S]+))?/, async (msg, match) => {
-  const text = match[1];
+bot.onText(/\/logs/, async (msg) => {
+  registerUserInChat(msg);
 
   if (isPrivateChat(msg)) {
-    if (!text) {
-      bot.sendMessage(
-        msg.chat.id,
-        "📌 Чтобы создать правила, напиши:\n\n/rules текст правил\n\nПример:\n/rules 1. Не спамить\n2. Не оскорблять\n3. Соблюдать порядок"
-      );
+    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /logs.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете смотреть логи.");
+    return;
+  }
+
+  bot.sendMessage(msg.chat.id, getAdminLogsText(msg.chat.id));
+});
+
+
+// /lock and /unlock handlers
+bot.onText(/\/lock/, async (msg) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /lock.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /lock.");
+    return;
+  }
+
+  const botCanChangePermissions = await canBotChangeSlowMode(msg.chat.id);
+
+  if (!botCanChangePermissions) {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Я не могу закрыть чат.\n\nДай боту права администратора:\n✅ Блокировка пользователей / Ограничение участников"
+    );
+    return;
+  }
+
+  try {
+    const slowModeDelay = await getCurrentSlowModeDelay(msg.chat.id);
+    await bot.setChatPermissions(msg.chat.id, getLockedChatPermissions(slowModeDelay));
+    addAdminLog(msg.chat.id, "🔒 Закрыл чат", msg.from, "Вся группа", "Обычные участники больше не могут писать.");
+    bot.sendMessage(msg.chat.id, "🔒 Чат закрыт. Обычные участники больше не могут писать.");
+  } catch (error) {
+    console.error("Lock error:", error.message);
+    bot.sendMessage(
+      msg.chat.id,
+      `⚠️ Не удалось закрыть чат.\n\nПричина: ${error.message || "неизвестная ошибка"}`
+    );
+  }
+});
+
+bot.onText(/\/unlock/, async (msg) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /unlock.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /unlock.");
+    return;
+  }
+
+  const botCanChangePermissions = await canBotChangeSlowMode(msg.chat.id);
+
+  if (!botCanChangePermissions) {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Я не могу открыть чат.\n\nДай боту права администратора:\n✅ Блокировка пользователей / Ограничение участников"
+    );
+    return;
+  }
+
+  try {
+    const slowModeDelay = await getCurrentSlowModeDelay(msg.chat.id);
+    await bot.setChatPermissions(msg.chat.id, getUnlockedChatPermissions(slowModeDelay));
+    addAdminLog(msg.chat.id, "🔓 Открыл чат", msg.from, "Вся группа", "Обычные участники снова могут писать.");
+    bot.sendMessage(msg.chat.id, "🔓 Чат открыт. Обычные участники снова могут писать.");
+  } catch (error) {
+    console.error("Unlock error:", error.message);
+    bot.sendMessage(
+      msg.chat.id,
+      `⚠️ Не удалось открыть чат.\n\nПричина: ${error.message || "неизвестная ошибка"}`
+    );
+  }
+});
+
+bot.onText(/\/admins/, async (msg) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "👑 Добавь меня в группу, чтобы посмотреть список администраторов.");
+    return;
+  }
+
+  try {
+    const admins = await bot.getChatAdministrators(msg.chat.id);
+
+    if (!admins || admins.length === 0) {
+      bot.sendMessage(msg.chat.id, "👑 Администраторы не найдены.");
       return;
     }
 
-    chatRules.set(msg.from.id, text);
+    const adminsText = admins
+      .map((admin, index) => {
+        const user = admin.user;
+        const name = getFullName(user);
+        const username = user.username ? `@${user.username}` : `ID:${user.id}`;
+        const role = admin.status === "creator" ? "👑 Владелец" : "⛑ Админ";
+
+        return `${index + 1}. ${role}\n   👤 ${name}\n   🏷 ${username}`;
+      })
+      .join("\n\n");
+
+    bot.sendMessage(msg.chat.id, `👑 Список администраторов:\n\n${adminsText}`);
+  } catch {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Не получилось получить список администраторов. Проверь, что бот добавлен в группу."
+    );
+  }
+});
+
+// /slowmode command handler
+bot.onText(/\/slowmode(?:\s+(\d+))?/, async (msg, match) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /slowmode.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /slowmode.");
+    return;
+  }
+
+  const seconds = Number(match[1]);
+
+  if (!match[1]) {
+    bot.sendMessage(
+      msg.chat.id,
+      "🐢 Использование:\n\n/slowmode 10 — задержка 10 секунд\n/slowmode 60 — задержка 1 минута\n/slowmode 0 — отключить slowmode"
+    );
+    return;
+  }
+
+  const allowedSlowModeValues = [0, 10, 30, 60, 300, 900, 3600];
+
+  if (!allowedSlowModeValues.includes(seconds)) {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Telegram поддерживает только эти значения:\n0, 10, 30, 60, 300, 900, 3600 секунд.\n\nПример: /slowmode 10"
+    );
+    return;
+  }
+
+  const botCanChangeSlowMode = await canBotChangeSlowMode(msg.chat.id);
+
+  if (!botCanChangeSlowMode) {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Я не могу изменить slowmode.\n\nДай боту права администратора:\n✅ Блокировка пользователей / Ограничение участников"
+    );
+    return;
+  }
+
+  try {
+    const permissions = await getChatPermissionsWithSlowMode(msg.chat.id, seconds);
+
+    await bot.setChatPermissions(msg.chat.id, permissions);
+
+    if (seconds === 0) {
+      addAdminLog(msg.chat.id, "🐢 Отключил slowmode", msg.from, "Вся группа", "Задержка сообщений отключена.");
+      bot.sendMessage(msg.chat.id, "✅ Slowmode отключён.");
+    } else {
+      addAdminLog(msg.chat.id, "🐢 Изменил slowmode", msg.from, "Вся группа", `Задержка: ${seconds} сек.`);
+      bot.sendMessage(msg.chat.id, `🐢 Slowmode установлен: ${seconds} сек.`);
+    }
+  } catch (error) {
+    console.error("Slowmode error:", error.message);
 
     bot.sendMessage(
       msg.chat.id,
-      "✅ Правила сохранены.\n\nТеперь добавь меня в группу или напиши /rules в группе, чтобы показать правила."
-    );
-    return;
-  }
-
-  registerUserInChat(msg);
-
-  if (text) {
-    const senderIsAdmin = await isUserAdmin(msg.chat.id, msg.from.id);
-
-    if (!senderIsAdmin) {
-      bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете менять правила.");
-      return;
-    }
-
-    chatRules.set(msg.chat.id, text);
-    bot.sendMessage(msg.chat.id, "✅ Правила группы сохранены.");
-    return;
-  }
-
-  const rules = chatRules.get(msg.chat.id) || chatRules.get(msg.from.id) || DEFAULT_RULES;
-  bot.sendMessage(msg.chat.id, `📌 Правила группы:\n\n${rules}`);
-});
-
-bot.on("new_chat_members", (msg) => {
-  if (!msg.new_chat_members || msg.new_chat_members.length === 0) return;
-
-  msg.new_chat_members.forEach((user) => {
-    const name = getTelegramName(user);
-    getUser(user);
-
-    const welcomeText = `👋 ${name} вступил(а) в группу\n\n🐸 Привет ${name}!\n\n⚠️ Правила — обязательно ознакомиться 👁️\n\n⛔ Не забудь скинуть свой username и ИТД, иначе будем вынуждены кикнуть.\n\n📗 Нажми кнопку ниже и ознакомься с правилами.`;
-
-    bot.sendMessage(msg.chat.id, welcomeText, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "⚡ ПОСМОТРЕТЬ ПРАВИЛА",
-              callback_data: `show_rules:${msg.chat.id}`
-            }
-          ]
-        ]
-      }
-    });
-  });
-});
-
-bot.on("callback_query", (query) => {
-  if (!query.data) return;
-
-  if (query.data.startsWith("show_rules:")) {
-    const chatId = Number(query.data.split(":")[1]);
-    const rules = chatRules.get(chatId) || DEFAULT_RULES;
-
-    bot.answerCallbackQuery(query.id);
-
-    bot.sendMessage(
-      query.message.chat.id,
-      `📗 ОБЯЗАТЕЛЬНО‼️‼️‼️\n\nК ознакомлению\n\n${rules}`
+      `⚠️ Не удалось изменить slowmode.\n\nПричина: ${error.message || "неизвестная ошибка"}\n\nПроверь, что группа является супергруппой, а у бота есть право ограничивать участников.`
     );
   }
 });
+
 
 bot.on("left_chat_member", (msg) => {
   if (!msg.left_chat_member) return;
@@ -461,7 +821,7 @@ bot.on("my_chat_member", (update) => {
   if (oldStatus !== "administrator" && newStatus === "administrator") {
     bot.sendMessage(
       chatId,
-      `⛑ ${adminName} сделал(а) меня администратором группы.\n\nТеперь мне доступны функции модерации: /warn, /mute, /unmute, /ban, /unban и /clear.`
+      `⛑ ${adminName} сделал(а) меня администратором группы.\n\nТеперь мне доступны функции модерации: warn, mute, unmute, kick, ban и unban.`
     );
   }
 });
@@ -474,9 +834,9 @@ bot.onText(/\/warn/, async (msg) => {
     return;
   }
 
-  const senderIsAdmin = await isUserAdmin(msg.chat.id, msg.from.id);
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
-  if (!senderIsAdmin) {
+  if (!senderCanUseAdminCommands) {
     bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /warn.");
     return;
   }
@@ -501,12 +861,15 @@ bot.onText(/\/warn/, async (msg) => {
   if (targetProfile.warnings >= 3) {
     try {
       await bot.banChatMember(msg.chat.id, targetProfile.id);
+      addAdminLog(msg.chat.id, "🚫 Автобан за 3 предупреждения", msg.from, getUserDisplayName(targetProfile), "Пользователь получил 3/3 предупреждений.");
       bot.sendMessage(msg.chat.id, `🚫 ${getUserDisplayName(targetProfile)} получил 3/3 предупреждений и был забанен.`);
     } catch {
       bot.sendMessage(msg.chat.id, `⚠️ ${getUserDisplayName(targetProfile)} получил 3/3 предупреждений, но я не смог забанить пользователя.`);
     }
     return;
   }
+
+  addAdminLog(msg.chat.id, "⚠️ Выдал предупреждение", msg.from, getUserDisplayName(targetProfile), `Предупреждения: ${targetProfile.warnings}/3`);
 
   bot.sendMessage(
     msg.chat.id,
@@ -522,9 +885,9 @@ bot.onText(/\/unwarn/, async (msg) => {
     return;
   }
 
-  const senderIsAdmin = await isUserAdmin(msg.chat.id, msg.from.id);
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
-  if (!senderIsAdmin) {
+  if (!senderCanUseAdminCommands) {
     bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /unwarn.");
     return;
   }
@@ -541,6 +904,8 @@ bot.onText(/\/unwarn/, async (msg) => {
 
   targetProfile.warnings = 0;
 
+  addAdminLog(msg.chat.id, "♻️ Снял предупреждения", msg.from, getUserDisplayName(targetProfile), "Предупреждения: 0/3");
+
   bot.sendMessage(
     msg.chat.id,
     `♻️ У пользователя ${getUserDisplayName(targetProfile)} сняты все предупреждения.\n\nПредупреждения: 0/3`
@@ -555,9 +920,9 @@ bot.onText(/\/mute/, async (msg) => {
     return;
   }
 
-  const senderIsAdmin = await isUserAdmin(msg.chat.id, msg.from.id);
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
-  if (!senderIsAdmin) {
+  if (!senderCanUseAdminCommands) {
     bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /mute.");
     return;
   }
@@ -600,6 +965,7 @@ bot.onText(/\/mute/, async (msg) => {
       clearTimeout(muteTimers.get(timerKey));
     }
 
+    addAdminLog(msg.chat.id, "🔇 Замьютил", msg.from, getUserDisplayName(targetProfile), `Время: ${duration.label}`);
     bot.sendMessage(msg.chat.id, `🔇 ${getUserDisplayName(targetProfile)} на mute на ${duration.label}`);
 
     const timer = setTimeout(async () => {
@@ -633,9 +999,9 @@ bot.onText(/\/unmute/, async (msg) => {
     return;
   }
 
-  const senderIsAdmin = await isUserAdmin(msg.chat.id, msg.from.id);
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
-  if (!senderIsAdmin) {
+  if (!senderCanUseAdminCommands) {
     bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /unmute.");
     return;
   }
@@ -662,9 +1028,59 @@ bot.onText(/\/unmute/, async (msg) => {
       muteTimers.delete(timerKey);
     }
 
+    addAdminLog(msg.chat.id, "🔊 Снял мут", msg.from, getUserDisplayName(targetProfile));
     bot.sendMessage(msg.chat.id, `🔊 С пользователя ${getUserDisplayName(targetProfile)} снят мут.`);
   } catch {
     bot.sendMessage(msg.chat.id, "⚠️ Я не смог снять мут. Проверь права администратора у бота.");
+  }
+});
+
+bot.onText(/\/(kick|cick)/, async (msg) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /kick.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /kick.");
+    return;
+  }
+
+  const targetProfile = resolveTargetProfile(msg);
+
+  if (!targetProfile) {
+    bot.sendMessage(
+      msg.chat.id,
+      "👢 Чтобы кикнуть пользователя, используй один из вариантов:\n\n1. Ответь на сообщение пользователя командой /kick\n2. Напиши /kick @username\n3. Напиши /kick ID\n\nВажно: /kick @username работает только если бот уже видел этого пользователя в группе после запуска. Самый надёжный способ — ответить /kick на сообщение пользователя."
+    );
+    return;
+  }
+
+  if (targetProfile.id === msg.from.id) {
+    bot.sendMessage(msg.chat.id, "⛔ Нельзя кикнуть самого себя.");
+    return;
+  }
+
+  try {
+    await bot.banChatMember(msg.chat.id, targetProfile.id, {
+      until_date: Math.floor(Date.now() / 1000) + 40
+    });
+
+    setTimeout(() => {
+      bot.unbanChatMember(msg.chat.id, targetProfile.id, { only_if_banned: true }).catch(() => {});
+    }, 1000);
+
+    addAdminLog(msg.chat.id, "👢 Кикнул", msg.from, getUserDisplayName(targetProfile));
+    bot.sendMessage(msg.chat.id, `👢 ${getUserDisplayName(targetProfile)} был(а) кикнут(а) из группы.`);
+  } catch {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Я не смог кикнуть пользователя. Проверь, что бот админ и у него есть право банить участников. Также бот не может кикнуть админа или владельца группы."
+    );
   }
 });
 
@@ -676,9 +1092,9 @@ bot.onText(/\/ban/, async (msg) => {
     return;
   }
 
-  const senderIsAdmin = await isUserAdmin(msg.chat.id, msg.from.id);
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
-  if (!senderIsAdmin) {
+  if (!senderCanUseAdminCommands) {
     bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /ban.");
     return;
   }
@@ -700,6 +1116,7 @@ bot.onText(/\/ban/, async (msg) => {
 
   try {
     await bot.banChatMember(msg.chat.id, targetProfile.id);
+    addAdminLog(msg.chat.id, "🚫 Забанил", msg.from, getUserDisplayName(targetProfile));
     bot.sendMessage(msg.chat.id, `🚫 ${getUserDisplayName(targetProfile)} был забанен.`);
   } catch {
     bot.sendMessage(msg.chat.id, "⚠️ Я не смог забанить пользователя. Проверь права администратора у бота.");
@@ -714,9 +1131,9 @@ bot.onText(/\/unban/, async (msg) => {
     return;
   }
 
-  const senderIsAdmin = await isUserAdmin(msg.chat.id, msg.from.id);
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
-  if (!senderIsAdmin) {
+  if (!senderCanUseAdminCommands) {
     bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /unban.");
     return;
   }
@@ -759,6 +1176,8 @@ bot.onText(/\/unban/, async (msg) => {
       targetProfile.warnings = 0;
     }
 
+    const targetText = targetProfile ? getUserDisplayName(targetProfile) : "ID:" + userId;
+    addAdminLog(msg.chat.id, "✅ Разбанил", msg.from, targetText);
     bot.sendMessage(msg.chat.id, `✅ Пользователь ${targetProfile ? getUserDisplayName(targetProfile) : "с ID " + userId} разбанен.`);
   } catch {
     bot.sendMessage(msg.chat.id, "⚠️ Я не смог разбанить пользователя. Проверь права администратора у бота.");
@@ -773,9 +1192,9 @@ bot.onText(/\/(clear|claer)(?:\s+(\d+))?/, async (msg, match) => {
     return;
   }
 
-  const senderIsAdmin = await isUserAdmin(msg.chat.id, msg.from.id);
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
-  if (!senderIsAdmin) {
+  if (!senderCanUseAdminCommands) {
     bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /clear.");
     return;
   }
@@ -819,6 +1238,7 @@ bot.onText(/\/(clear|claer)(?:\s+(\d+))?/, async (msg, match) => {
     return;
   }
 
+  addAdminLog(msg.chat.id, "🧹 Очистил сообщения", msg.from, "Чат", `Удалено сообщений: ${deletedCount}`);
   bot.sendMessage(msg.chat.id, `🧹 Удалено сообщений: ${deletedCount}`);
 });
 
