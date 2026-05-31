@@ -7,8 +7,10 @@
     "start": "node src/bot.js"
   },
   "dependencies": {
+    "better-sqlite3": "^12.10.0",
     "dotenv": "^17.4.2",
     "node-telegram-bot-api": "^0.67.0",
-    "openai": "^6.39.1"
+    "openai": "^6.39.1",
+    "sqlite3": "^6.0.1"
   }
 }

@@ -1,9 +1,13 @@
-require("dotenv").config();
+require("dotenv").config({ path: "/home/container/.env" });
+
+console.log("TOKEN:", process.env.BOT_TOKEN);
+console.log("OWNER_IDS:", process.env.OWNER_IDS);
 
 const TelegramBot = require("node-telegram-bot-api");
 
 const botToken = process.env.BOT_TOKEN;
 const ownerIds = (process.env.OWNER_IDS || "")
+
   .split(",")
   .map((id) => Number(id.trim()))
   .filter((id) => Number.isInteger(id));
@@ -14,6 +18,7 @@ if (!botToken) {
 }
 
 const bot = new TelegramBot(botToken, { polling: true });
+const db = require("../database");
 
 console.log("🍦 Сливки Бот запущен");
 
@@ -21,6 +26,239 @@ const users = new Map();
 const chatUsers = new Map();
 const muteTimers = new Map();
 const adminLogs = new Map();
+const pendingMarriages = new Map();
+
+const fs = require("fs");
+const path = require("path");
+
+const STATS_FILE = path.join(__dirname, "stats.json");
+const CHATS_FILE = path.join(__dirname, "chats.json");
+const USERS_FILE = path.join(__dirname, "users.json");
+const MARRIAGES_FILE = path.join(__dirname, "marriages.json");
+
+const stats = loadStats();
+const chatInfo = loadChatInfo();
+const marriages = loadMarriages();
+const savedUsers = loadUsers();
+
+for (const [id, user] of savedUsers) {
+  users.set(id, user);
+}
+
+console.log("Users file:", USERS_FILE);
+console.log("Saved users loaded:", users.size);
+
+function loadUsers() {
+  try {
+    if (!fs.existsSync(USERS_FILE)) {
+      return new Map();
+    }
+
+    const data = JSON.parse(fs.readFileSync(USERS_FILE, "utf8"));
+
+    return new Map(
+      Object.entries(data).map(([id, user]) => [Number(id), user])
+    );
+  } catch (error) {
+    console.error("Load users error:", error.message);
+    return new Map();
+  }
+}
+
+function saveUsers() {
+  try {
+    const data = Object.fromEntries(users);
+    fs.writeFileSync(USERS_FILE, JSON.stringify(data, null, 2), "utf8");
+  } catch (error) {
+    console.error("Save users error:", error.message);
+  }
+}
+
+function getTashkentDateInfo() {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tashkent",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  });
+
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date()).map((part) => [part.type, part.value])
+  );
+
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    hour: Number(parts.hour),
+    minute: Number(parts.minute)
+  };
+}
+
+function loadStats() {
+  try {
+    if (!fs.existsSync(STATS_FILE)) {
+      return {
+        messagesToday: 0,
+        chatMessagesToday: {},
+        lastResetDate: getTashkentDateInfo().date
+      };
+    }
+
+    const data = JSON.parse(fs.readFileSync(STATS_FILE, "utf8"));
+
+    return {
+      messagesToday: Number(data.messagesToday) || 0,
+      chatMessagesToday: data.chatMessagesToday && typeof data.chatMessagesToday === "object" ? data.chatMessagesToday : {},
+      lastResetDate: data.lastResetDate || getTashkentDateInfo().date
+    };
+  } catch {
+    return {
+      messagesToday: 0,
+      chatMessagesToday: {},
+      lastResetDate: getTashkentDateInfo().date
+    };
+  }
+}
+
+function saveStats() {
+  fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2));
+}
+
+function loadChatInfo() {
+  try {
+    if (!fs.existsSync(CHATS_FILE)) {
+      return new Map();
+    }
+
+    const data = JSON.parse(fs.readFileSync(CHATS_FILE, "utf8"));
+
+    return new Map(
+      Object.entries(data).map(([chatId, info]) => [Number(chatId), info])
+    );
+  } catch (error) {
+    console.error("Load chats error:", error.message);
+    return new Map();
+  }
+}
+
+function saveChatInfo() {
+  try {
+    const data = Object.fromEntries(chatInfo);
+    fs.writeFileSync(CHATS_FILE, JSON.stringify(data, null, 2));
+  } catch (error) {
+    console.error("Save chats error:", error.message);
+  }
+}
+
+function loadMarriages() {
+  try {
+    if (!fs.existsSync(MARRIAGES_FILE)) {
+      fs.writeFileSync(MARRIAGES_FILE, "{}", "utf8");
+      return new Map();
+    }
+
+    const fileContent = fs.readFileSync(MARRIAGES_FILE, "utf8").trim();
+
+    if (!fileContent) {
+      fs.writeFileSync(MARRIAGES_FILE, "{}", "utf8");
+      return new Map();
+    }
+
+    const data = JSON.parse(fileContent);
+
+    return new Map(
+      Object.entries(data).map(([chatId, chatMarriages]) => [Number(chatId), chatMarriages])
+    );
+  } catch (error) {
+    console.error("Load marriages error:", error.message);
+    fs.writeFileSync(MARRIAGES_FILE, "{}", "utf8");
+    return new Map();
+  }
+}
+
+function saveMarriages() {
+  try {
+    const data = Object.fromEntries(marriages);
+    fs.writeFileSync(MARRIAGES_FILE, JSON.stringify(data, null, 2), "utf8");
+  } catch (error) {
+    console.error("Save marriages error:", error.message);
+  }
+}
+
+function getChatMarriages(chatId) {
+  if (!marriages.has(chatId)) {
+    marriages.set(chatId, {});
+  }
+
+  return marriages.get(chatId);
+}
+
+function getMarriagePartnerId(chatId, userId) {
+  const chatMarriages = getChatMarriages(chatId);
+  const partnerId = chatMarriages[userId];
+  return partnerId ? Number(partnerId) : null;
+}
+
+function setMarriage(chatId, firstUserId, secondUserId) {
+  const chatMarriages = getChatMarriages(chatId);
+  chatMarriages[firstUserId] = secondUserId;
+  chatMarriages[secondUserId] = firstUserId;
+  saveMarriages();
+}
+
+function removeMarriage(chatId, userId) {
+  const chatMarriages = getChatMarriages(chatId);
+  const partnerId = chatMarriages[userId];
+
+  if (!partnerId) return null;
+
+  delete chatMarriages[userId];
+  delete chatMarriages[partnerId];
+  saveMarriages();
+
+  return Number(partnerId);
+}
+
+function createMarriageProposal(chatId, firstUserId, secondUserId, percent) {
+  const proposalId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+
+  pendingMarriages.set(proposalId, {
+    chatId,
+    firstUserId,
+    secondUserId,
+    percent
+  });
+
+  setTimeout(() => {
+    pendingMarriages.delete(proposalId);
+  }, 10 * 60 * 1000);
+
+  return proposalId;
+}
+
+
+const commandSettings = new Map([
+  ["start", true],
+  ["menu", true],
+  ["commands", true],
+  ["profile", true],
+  ["admins", true],
+  ["slowmode", true],
+  ["lock", true],
+  ["unlock", true],
+  ["logs", true],
+  ["stats", true],
+  ["warn", true],
+  ["unwarn", true],
+  ["mute", true],
+  ["unmute", true],
+  ["kick", true],
+  ["ban", true],
+  ["unban", true],
+  ["clear", true]
+]);
 
 let botUsername = "";
 
@@ -41,13 +279,17 @@ async function setupBotCommands() {
       { command: "lock", description: "🔒 закрыть чат" },
       { command: "unlock", description: "🔓 открыть чат" },
       { command: "logs", description: "📋 логи админ-действий" },
+      { command: "stats", description: "📊 статистика" },
       { command: "warn", description: "⚠️ предупреждение" },
       { command: "unwarn", description: "♻️ снять предупреждения" },
       { command: "mute", description: "🔇 мут" },
       { command: "unmute", description: "🔊 снять мут" },
       { command: "kick", description: "👢 кик" },
       { command: "ban", description: "🚫 бан" },
-      { command: "unban", description: "✅ разбан" }
+      { command: "unban", description: "✅ разбан" },
+      { command: "brak", description: "💍 Брак" },
+      { command: "razvod", description: "💔 Развод" },
+      { command: "partner", description: "💞 Вторая половинка" }
     ];
 
     const privateCommands = [
@@ -77,6 +319,7 @@ function getUser(user) {
       id,
       firstName: user.first_name || "Пользователь",
       username: user.username || "нет",
+      isBot: user.is_bot === true,
       messages: 0,
       warnings: 0
     });
@@ -85,6 +328,9 @@ function getUser(user) {
   const profile = users.get(id);
   profile.firstName = user.first_name || profile.firstName;
   profile.username = user.username || profile.username || "нет";
+  profile.isBot = user.is_bot === true;
+
+  saveUsers();
 
   return profile;
 }
@@ -104,7 +350,28 @@ function registerUserInChat(msg) {
     chatUsers.set(chatId, new Set());
   }
 
+  if (!chatInfo.has(chatId)) {
+    chatInfo.set(chatId, {
+      joinedAt: formatDateTime(),
+      title: msg.chat.title || "Группа",
+      type: msg.chat.type,
+      users: []
+    });
+  }
+
   chatUsers.get(chatId).add(profile.id);
+
+  // --- Add users array to chatInfo and update it
+  const info = chatInfo.get(chatId);
+
+  if (!Array.isArray(info.users)) {
+    info.users = [];
+  }
+
+  if (!info.users.includes(profile.id)) {
+    info.users.push(profile.id);
+    saveChatInfo();
+  }
 }
 
 function getTelegramName(user) {
@@ -210,6 +477,24 @@ function getAdminLogsText(chatId) {
     .join("\n\n");
 }
 
+bot.onText(/\/stats/, async (msg) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /stats.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете смотреть статистику.");
+    return;
+  }
+
+  bot.sendMessage(msg.chat.id, await getStatsText(msg.chat.id));
+});
+
 function findUserByUsername(username) {
   const cleanUsername = username.replace("@", "").toLowerCase();
 
@@ -220,6 +505,53 @@ function findUserByUsername(username) {
       user.username.toLowerCase() === cleanUsername
     );
   });
+}
+
+function resetDailyStatsIfNeeded() {
+  const current = getTashkentDateInfo();
+  const shouldReset = current.hour === 23 && current.minute >= 59;
+
+  if (shouldReset && stats.lastResetDate !== current.date) {
+    stats.messagesToday = 0;
+    stats.chatMessagesToday = {};
+    stats.lastResetDate = current.date;
+    saveStats();
+  }
+}
+
+async function getStatsText(chatId) {
+  resetDailyStatsIfNeeded();
+
+  let totalUsers = 0;
+
+  try {
+    totalUsers = await bot.getChatMemberCount(chatId);
+  } catch (error) {
+    console.error("Stats count error:", error.message);
+    totalUsers = chatUsers.has(chatId) ? chatUsers.get(chatId).size : users.size;
+  }
+
+  const seenUsersInThisGroup = chatUsers.has(chatId) ? chatUsers.get(chatId).size : 0;
+  const messagesInThisGroup = stats.chatMessagesToday?.[chatId] || 0;
+
+  return (
+    "«СЛИВКИ»\n" +
+    "📊 СТАТИСТИКА ГРУППЫ\n\n" +
+    `👥 Участников в этой группе: ${totalUsers}\n\n` +
+    `👤 Пользователей, которых бот видел в этой группе: ${seenUsersInThisGroup}\n\n` +
+    `💬 Сообщений сегодня в этой группе: ${messagesInThisGroup}`
+  );
+}
+
+async function getAdminStatsText() {
+  resetDailyStatsIfNeeded();
+
+  return (
+    "🍦 АДМИН-СТАТИСТИКА СЛИВКИ\n\n" +
+    `🤖 Всего групп, где есть бот: ${chatInfo.size}\n\n` +
+    `👤 Всего пользователей, которых видел бот: ${users.size}\n\n` +
+    `💬 Всего сообщений сегодня: ${stats.messagesToday}`
+  );
 }
 
 function resolveTargetProfile(msg) {
@@ -262,6 +594,111 @@ async function isUserAdmin(chatId, userId) {
 
 function isOwner(userId) {
   return ownerIds.includes(Number(userId));
+}
+
+function isCommandEnabled(commandName) {
+  return commandSettings.get(commandName) !== false;
+}
+
+function getCommandStatus(commandName) {
+  return isCommandEnabled(commandName) ? "ON ✅" : "OFF ❌";
+}
+
+function getAdminPanelText() {
+  return "🍦 АДМИН-ПАНЕЛЬ СЛИВКИ\n\n" +
+    "📊 Статистика\n" +
+    "⚙️ Команды\n" +
+    "📜 Логи\n" +
+    "🛡 Модерация\n" +
+    "👥 Пользователи\n\n" +
+    "❌ Закрыть";
+}
+
+function getAdminPanelKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "📊 Статистика", callback_data: "admin_stats" }],
+        [{ text: "⚙️ Команды", callback_data: "admin_commands" }],
+        [{ text: "📜 Логи", callback_data: "admin_logs" }],
+        [{ text: "🛡 Модерация", callback_data: "admin_moderation" }],
+        [{ text: "👥 Пользователи", callback_data: "admin_users" }],
+        [{ text: "❌ Закрыть", callback_data: "admin_close" }]
+      ]
+    }
+  };
+}
+
+function getCommandSettingsKeyboard() {
+  const rows = Array.from(commandSettings.keys()).map((commandName) => [
+    {
+      text: `/${commandName} — ${getCommandStatus(commandName)}`,
+      callback_data: `toggle_command:${commandName}`
+    }
+  ]);
+
+  rows.push([{ text: "🔙 Назад", callback_data: "admin_back" }]);
+
+  return {
+    reply_markup: {
+      inline_keyboard: rows
+    }
+  };
+}
+
+function getBackKeyboard() {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "🔙 Назад", callback_data: "admin_back" }]
+      ]
+    }
+  };
+}
+
+function getAdminCommandsText() {
+  return "⚙️ УПРАВЛЕНИЕ КОМАНДАМИ\n\n" +
+    "Нажми на команду, чтобы включить или выключить её.\n\n" +
+    "✅ ON — команда работает\n" +
+    "❌ OFF — команда выключена";
+}
+
+function getAdminModerationText() {
+  return "🛡 МОДЕРАЦИЯ\n\n" +
+    "⚠️ /warn — выдать предупреждение\n" +
+    "♻️ /unwarn — снять предупреждения\n" +
+    "🔇 /mute — выдать мут\n" +
+    "🔊 /unmute — снять мут\n" +
+    "👢 /kick — кикнуть пользователя\n" +
+    "🚫 /ban — забанить пользователя\n" +
+    "✅ /unban — разбанить пользователя\n" +
+    "🐢 /slowmode — задержка сообщений\n" +
+    "🔒 /lock — закрыть чат\n" +
+    "🔓 /unlock — открыть чат\n" +
+    "🧹 /clear — очистить сообщения";
+}
+
+function getAdminUsersText(chatId) {
+  const groupUsers = chatUsers.has(chatId) ? chatUsers.get(chatId).size : 0;
+
+  return "👥 ПОЛЬЗОВАТЕЛИ И ГРУППЫ\n\n" +
+    `🤖 Групп, где есть бот: ${chatInfo.size}\n` +
+    `👤 Всего пользователей, которых видел бот: ${users.size}\n` +
+    `👥 Пользователей в этой группе, которых видел бот: ${groupUsers}\n\n` +
+    "ℹ️ Telegram не отдаёт боту полный список пользователей. Бот показывает тех, кого уже видел.";
+}
+
+function replyCommandDisabled(msg, commandName) {
+  bot.sendMessage(msg.chat.id, `⛔ Команда /${commandName} сейчас выключена владельцем бота.`);
+}
+
+function ensureCommandEnabled(msg, commandName) {
+  if (isCommandEnabled(commandName)) return true;
+
+  if (isOwner(msg.from?.id)) return true;
+
+  replyCommandDisabled(msg, commandName);
+  return false;
 }
 
 async function canUseAdminCommands(chatId, userId) {
@@ -379,6 +816,7 @@ function getUnlockedChatPermissions(slowModeDelay = 0) {
 function addActivity(user) {
   const profile = getUser(user);
   profile.messages += 1;
+  saveUsers();
   return profile;
 }
 
@@ -463,7 +901,8 @@ function getCommandsText() {
     "• /slowmode 10 — задержка сообщений\n" +
     "• /lock — закрыть чат\n" +
     "• /unlock — открыть чат\n" +
-    "• /logs — логи админ-действий\n\n" +
+    "• /logs — логи админ-действий\n" +
+    "• /stats — статистика группы\n\n" +
     "🛡 Модерация\n" +
     "• /warn — выдать предупреждение\n" +
     "• /unwarn — снять предупреждения\n" +
@@ -482,6 +921,7 @@ function getCommandsText() {
     "/kick @username";
 }
 
+
 function getGroupKeyboard() {
   return {
     reply_markup: {
@@ -490,8 +930,30 @@ function getGroupKeyboard() {
   };
 }
 
+function getRandomPercent() {
+  return Math.floor(Math.random() * 100) + 1;
+}
+
+function parseProbabilityQuestion(text) {
+  const cleanText = text.trim();
+  const match = cleanText.match(/^сливки\s+(?:вероятность|шанс)\s*(?:того\s*)?(?:что\s*)?(.+)$/i);
+
+  if (!match) return null;
+
+  const question = match[1].trim();
+
+  if (!question) return null;
+
+  return question;
+}
+
+function getMarriagePercent() {
+  return Math.floor(Math.random() * 101);
+}
+
 bot.onText(/\/start/, async (msg) => {
   getUser(msg.from);
+  if (!ensureCommandEnabled(msg, "start")) return;
   registerUserInChat(msg);
 
   if (isPrivateChat(msg)) {
@@ -526,8 +988,202 @@ bot.onText(/\/start/, async (msg) => {
   );
 });
 
+bot.onText(/\/admin/, (msg) => {
+  getUser(msg.from);
+
+  if (!isPrivateChat(msg)) return;
+
+  if (!isOwner(msg.from.id)) {
+    bot.sendMessage(msg.chat.id, "⛔ У вас нет доступа к админ-панели.");
+    return;
+  }
+
+  bot.sendMessage(msg.chat.id, getAdminPanelText(), getAdminPanelKeyboard());
+});
+
+bot.on("callback_query", async (query) => {
+  const data = query.data || "";
+  const chatId = query.message?.chat?.id;
+  const messageId = query.message?.message_id;
+  const userId = query.from?.id;
+  if (data.startsWith("marriage_accept:") || data.startsWith("marriage_decline:")) {
+    const [action, proposalId] = data.split(":");
+    const proposal = pendingMarriages.get(proposalId);
+
+    if (!proposal) {
+      await bot.answerCallbackQuery(query.id, {
+        text: "⏳ Предложение уже устарело.",
+        show_alert: true
+      });
+      return;
+    }
+
+    if (Number(userId) !== Number(proposal.secondUserId)) {
+      await bot.answerCallbackQuery(query.id, {
+        text: "⛔ Это предложение не для вас.",
+        show_alert: true
+      });
+      return;
+    }
+
+    const firstUser = users.get(proposal.firstUserId);
+    const secondUser = users.get(proposal.secondUserId);
+
+    const firstName = firstUser ? getUserDisplayName(firstUser) : `ID:${proposal.firstUserId}`;
+    const secondName = secondUser ? getUserDisplayName(secondUser) : `ID:${proposal.secondUserId}`;
+
+    if (action === "marriage_decline") {
+      pendingMarriages.delete(proposalId);
+
+      await bot.editMessageText(
+        `💔 ПРЕДЛОЖЕНИЕ ОТКЛОНЕНО\n\n${secondName} отказался(ась) от игрового брака с ${firstName}.`,
+        {
+          chat_id: proposal.chatId,
+          message_id: query.message.message_id
+        }
+      );
+
+      await bot.answerCallbackQuery(query.id, { text: "Вы отказались." });
+      return;
+    }
+
+    if (
+      getMarriagePartnerId(proposal.chatId, proposal.firstUserId) ||
+      getMarriagePartnerId(proposal.chatId, proposal.secondUserId)
+    ) {
+      pendingMarriages.delete(proposalId);
+
+      await bot.editMessageText(
+        "💍 Брак не оформлен. Кто-то из участников уже состоит в игровом браке.",
+        {
+          chat_id: proposal.chatId,
+          message_id: query.message.message_id
+        }
+      );
+
+      await bot.answerCallbackQuery(query.id, { text: "Брак не оформлен." });
+      return;
+    }
+
+    setMarriage(proposal.chatId, proposal.firstUserId, proposal.secondUserId);
+    pendingMarriages.delete(proposalId);
+
+    await bot.editMessageText(
+      `💍 БРАК ПОДТВЕРЖДЁН!\n\n👤 Первая половинка: ${firstName}\n💞 Вторая половинка: ${secondName}\n\n❤️ Совместимость: ${proposal.percent}%\n\n🍦 Сливки официально подтверждает этот союз!`,
+      {
+        chat_id: proposal.chatId,
+        message_id: query.message.message_id
+      }
+    );
+
+    await bot.answerCallbackQuery(query.id, { text: "Брак подтверждён!" });
+    return;
+  }
+
+  if (!data.startsWith("admin_") && !data.startsWith("toggle_command:")) return;
+
+  if (!isOwner(userId)) {
+    await bot.answerCallbackQuery(query.id, {
+      text: "⛔ Нет доступа",
+      show_alert: true
+    });
+    return;
+  }
+
+  if (data === "admin_back") {
+    await bot.editMessageText(getAdminPanelText(), {
+      chat_id: chatId,
+      message_id: messageId,
+      ...getAdminPanelKeyboard()
+    });
+    await bot.answerCallbackQuery(query.id);
+    return;
+  }
+
+  if (data === "admin_close") {
+    await bot.deleteMessage(chatId, messageId).catch(() => { });
+    await bot.answerCallbackQuery(query.id, { text: "Админ-панель закрыта" });
+    return;
+  }
+
+  if (data === "admin_commands") {
+    await bot.editMessageText(getAdminCommandsText(), {
+      chat_id: chatId,
+      message_id: messageId,
+      ...getCommandSettingsKeyboard()
+    });
+    await bot.answerCallbackQuery(query.id);
+    return;
+  }
+
+  if (data === "admin_stats") {
+    await bot.editMessageText(await getAdminStatsText(), {
+      chat_id: chatId,
+      message_id: messageId,
+      ...getBackKeyboard()
+    });
+    await bot.answerCallbackQuery(query.id);
+    return;
+  }
+
+  if (data === "admin_logs") {
+    await bot.editMessageText(getAdminLogsText(chatId), {
+      chat_id: chatId,
+      message_id: messageId,
+      ...getBackKeyboard()
+    });
+    await bot.answerCallbackQuery(query.id);
+    return;
+  }
+
+  if (data === "admin_moderation") {
+    await bot.editMessageText(getAdminModerationText(), {
+      chat_id: chatId,
+      message_id: messageId,
+      ...getBackKeyboard()
+    });
+    await bot.answerCallbackQuery(query.id);
+    return;
+  }
+
+  if (data === "admin_users") {
+    await bot.editMessageText(getAdminUsersText(chatId), {
+      chat_id: chatId,
+      message_id: messageId,
+      ...getBackKeyboard()
+    });
+    await bot.answerCallbackQuery(query.id);
+    return;
+  }
+
+  if (data.startsWith("toggle_command:")) {
+    const commandName = data.replace("toggle_command:", "");
+
+    if (!commandSettings.has(commandName)) {
+      await bot.answerCallbackQuery(query.id, {
+        text: "Команда не найдена",
+        show_alert: true
+      });
+      return;
+    }
+
+    commandSettings.set(commandName, !isCommandEnabled(commandName));
+
+    await bot.answerCallbackQuery(query.id, {
+      text: `/${commandName}: ${getCommandStatus(commandName)}`
+    });
+
+    await bot.editMessageText(getAdminCommandsText(), {
+      chat_id: chatId,
+      message_id: messageId,
+      ...getCommandSettingsKeyboard()
+    });
+  }
+});
+
 bot.onText(/\/menu/, (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "menu")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "📋 Чтобы открыть меню команд, добавь меня в группу и напиши там /menu");
@@ -539,6 +1195,7 @@ bot.onText(/\/menu/, (msg) => {
 
 bot.onText(/\/help/, (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "menu")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(
@@ -553,6 +1210,7 @@ bot.onText(/\/help/, (msg) => {
 
 bot.onText(/\/commands/, (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "commands")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "📜 Добавь меня в группу, чтобы посмотреть команды.");
@@ -564,6 +1222,7 @@ bot.onText(/\/commands/, (msg) => {
 
 bot.onText(/\/profile/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "profile")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /profile.");
@@ -580,7 +1239,7 @@ bot.onText(/\/profile/, async (msg) => {
     const member = await bot.getChatMember(msg.chat.id, targetUser.id);
     memberStatus = member.status;
     joinedDate = formatUnixDate(member.joined_date);
-  } catch {}
+  } catch { }
 
   const usernameText = targetUser.username ? `@${targetUser.username}` : "Отсутствует";
   const tagText = getUserTag(targetUser);
@@ -602,8 +1261,10 @@ bot.onText(/\/profile/, async (msg) => {
   bot.sendMessage(msg.chat.id, profileText);
 });
 
+
 bot.onText(/\/logs/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "logs")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /logs.");
@@ -620,10 +1281,35 @@ bot.onText(/\/logs/, async (msg) => {
   bot.sendMessage(msg.chat.id, getAdminLogsText(msg.chat.id));
 });
 
+bot.onText(/\/(partner|партнер)/i, (msg) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "💞 Добавь меня в группу, чтобы пользоваться командой /partner.");
+    return;
+  }
+
+  const partnerId = getMarriagePartnerId(msg.chat.id, msg.from.id);
+
+  if (!partnerId) {
+    bot.sendMessage(msg.chat.id, "💔 У тебя пока нет игровой второй половинки.");
+    return;
+  }
+
+  const partner = users.get(partnerId);
+  const partnerName = partner ? getUserDisplayName(partner) : `ID:${partnerId}`;
+
+  bot.sendMessage(
+    msg.chat.id,
+    `💞 Твоя игровая вторая половинка: ${partnerName}`,
+    { reply_to_message_id: msg.message_id }
+  );
+});
 
 // /lock and /unlock handlers
 bot.onText(/\/lock/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "lock")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /lock.");
@@ -663,6 +1349,7 @@ bot.onText(/\/lock/, async (msg) => {
 
 bot.onText(/\/unlock/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "unlock")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /unlock.");
@@ -702,6 +1389,7 @@ bot.onText(/\/unlock/, async (msg) => {
 
 bot.onText(/\/admins/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "admins")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👑 Добавь меня в группу, чтобы посмотреть список администраторов.");
@@ -737,69 +1425,150 @@ bot.onText(/\/admins/, async (msg) => {
 });
 
 // /slowmode command handler
-bot.onText(/\/slowmode(?:\s+(\d+))?/, async (msg, match) => {
+bot.onText(/\/slowmode(?:\s+(.+))?/i, async (msg, match) => {
   registerUserInChat(msg);
 
+  if (!ensureCommandEnabled(msg, "slowmode")) return;
+
   if (isPrivateChat(msg)) {
-    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /slowmode.");
-    return;
+    return bot.sendMessage(
+      msg.chat.id,
+      "👤 Добавь меня в группу, чтобы пользоваться командой /slowmode."
+    );
   }
 
-  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+  const senderCanUseAdminCommands = await canUseAdminCommands(
+    msg.chat.id,
+    msg.from.id
+  );
 
   if (!senderCanUseAdminCommands) {
-    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /slowmode.");
-    return;
+    return bot.sendMessage(
+      msg.chat.id,
+      "⛔ Вы не админ."
+    );
   }
 
-  const seconds = Number(match[1]);
+  const value = (match[1] || "").trim();
 
-  if (!match[1]) {
-    bot.sendMessage(
+  if (!value) {
+    return bot.sendMessage(
       msg.chat.id,
-      "🐢 Использование:\n\n/slowmode 10 — задержка 10 секунд\n/slowmode 60 — задержка 1 минута\n/slowmode 0 — отключить slowmode"
+      `🐢 Использование:
+
+/slowmode 10s — 10 секунд
+/slowmode 30s — 30 секунд
+/slowmode 1m — 1 минута
+/slowmode 5m — 5 минут
+/slowmode 15m — 15 минут
+/slowmode 1h — 1 час
+/slowmode 0 — отключить
+
+👤 Для пользователя:
+
+/mute @username 10m
+/mute @username 1d`
     );
-    return;
   }
 
-  const allowedSlowModeValues = [0, 10, 30, 60, 300, 900, 3600];
-
-  if (!allowedSlowModeValues.includes(seconds)) {
-    bot.sendMessage(
+  if (value.includes("@")) {
+    return bot.sendMessage(
       msg.chat.id,
-      "⚠️ Telegram поддерживает только эти значения:\n0, 10, 30, 60, 300, 900, 3600 секунд.\n\nПример: /slowmode 10"
+      `⚠️ Slowmode работает только на весь чат.
+
+Для пользователя используй:
+
+/mute @username 10m
+/mute @username 1d`
     );
-    return;
+  }
+
+  let seconds = 0;
+
+  if (value === "0") {
+    seconds = 0;
+  } else if (value === "10s") {
+    seconds = 10;
+  } else if (value === "30s") {
+    seconds = 30;
+  } else if (value === "1m") {
+    seconds = 60;
+  } else if (value === "5m") {
+    seconds = 300;
+  } else if (value === "15m") {
+    seconds = 900;
+  } else if (value === "1h") {
+    seconds = 3600;
+  } else {
+    return bot.sendMessage(
+      msg.chat.id,
+      `⚠️ Telegram поддерживает только:
+
+0
+10s
+30s
+1m
+5m
+15m
+1h
+
+Пример:
+/slowmode 5m`
+    );
   }
 
   const botCanChangeSlowMode = await canBotChangeSlowMode(msg.chat.id);
 
   if (!botCanChangeSlowMode) {
-    bot.sendMessage(
+    return bot.sendMessage(
       msg.chat.id,
-      "⚠️ Я не могу изменить slowmode.\n\nДай боту права администратора:\n✅ Блокировка пользователей / Ограничение участников"
+      "⚠️ У бота нет прав администратора."
     );
-    return;
   }
 
   try {
-    const permissions = await getChatPermissionsWithSlowMode(msg.chat.id, seconds);
+    const permissions = await getChatPermissionsWithSlowMode(
+      msg.chat.id,
+      seconds
+    );
 
-    await bot.setChatPermissions(msg.chat.id, permissions);
+    await bot.setChatPermissions(
+      msg.chat.id,
+      permissions
+    );
 
     if (seconds === 0) {
-      addAdminLog(msg.chat.id, "🐢 Отключил slowmode", msg.from, "Вся группа", "Задержка сообщений отключена.");
-      bot.sendMessage(msg.chat.id, "✅ Slowmode отключён.");
-    } else {
-      addAdminLog(msg.chat.id, "🐢 Изменил slowmode", msg.from, "Вся группа", `Задержка: ${seconds} сек.`);
-      bot.sendMessage(msg.chat.id, `🐢 Slowmode установлен: ${seconds} сек.`);
+      addAdminLog(
+        msg.chat.id,
+        "🐢 Отключил slowmode",
+        msg.from,
+        "Вся группа"
+      );
+
+      return bot.sendMessage(
+        msg.chat.id,
+        "✅ Slowmode отключён."
+      );
     }
-  } catch (error) {
-    console.error("Slowmode error:", error.message);
+
+    addAdminLog(
+      msg.chat.id,
+      "🐢 Изменил slowmode",
+      msg.from,
+      "Вся группа",
+      `${seconds} сек`
+    );
 
     bot.sendMessage(
       msg.chat.id,
-      `⚠️ Не удалось изменить slowmode.\n\nПричина: ${error.message || "неизвестная ошибка"}\n\nПроверь, что группа является супергруппой, а у бота есть право ограничивать участников.`
+      `🐢 Slowmode установлен: ${value}`
+    );
+  } catch (error) {
+    console.error(error);
+
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Не удалось изменить slowmode."
     );
   }
 });
@@ -818,6 +1587,21 @@ bot.on("my_chat_member", (update) => {
   const chatId = update.chat.id;
   const adminName = getTelegramName(update.from);
 
+  if (["member", "administrator"].includes(newStatus) && !chatInfo.has(chatId)) {
+    chatInfo.set(chatId, {
+      joinedAt: formatDateTime(),
+      title: update.chat.title || "Группа",
+      type: update.chat.type
+    });
+    saveChatInfo();
+  }
+
+  if (["left", "kicked"].includes(newStatus)) {
+    chatInfo.delete(chatId);
+    chatUsers.delete(chatId);
+    saveChatInfo();
+  }
+
   if (oldStatus !== "administrator" && newStatus === "administrator") {
     bot.sendMessage(
       chatId,
@@ -828,6 +1612,7 @@ bot.on("my_chat_member", (update) => {
 
 bot.onText(/\/warn/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "warn")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /warn.");
@@ -879,6 +1664,7 @@ bot.onText(/\/warn/, async (msg) => {
 
 bot.onText(/\/unwarn/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "unwarn")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /unwarn.");
@@ -914,6 +1700,7 @@ bot.onText(/\/unwarn/, async (msg) => {
 
 bot.onText(/\/mute/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "mute")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /mute.");
@@ -993,6 +1780,7 @@ bot.onText(/\/mute/, async (msg) => {
 
 bot.onText(/\/unmute/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "unmute")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /unmute.");
@@ -1037,6 +1825,7 @@ bot.onText(/\/unmute/, async (msg) => {
 
 bot.onText(/\/(kick|cick)/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "kick")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /kick.");
@@ -1071,7 +1860,7 @@ bot.onText(/\/(kick|cick)/, async (msg) => {
     });
 
     setTimeout(() => {
-      bot.unbanChatMember(msg.chat.id, targetProfile.id, { only_if_banned: true }).catch(() => {});
+      bot.unbanChatMember(msg.chat.id, targetProfile.id, { only_if_banned: true }).catch(() => { });
     }, 1000);
 
     addAdminLog(msg.chat.id, "👢 Кикнул", msg.from, getUserDisplayName(targetProfile));
@@ -1086,6 +1875,7 @@ bot.onText(/\/(kick|cick)/, async (msg) => {
 
 bot.onText(/\/ban/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "ban")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /ban.");
@@ -1125,6 +1915,7 @@ bot.onText(/\/ban/, async (msg) => {
 
 bot.onText(/\/unban/, async (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "unban")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /unban.");
@@ -1186,6 +1977,7 @@ bot.onText(/\/unban/, async (msg) => {
 
 bot.onText(/\/(clear|claer)(?:\s+(\d+))?/, async (msg, match) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "clear")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /clear.");
@@ -1230,7 +2022,7 @@ bot.onText(/\/(clear|claer)(?:\s+(\d+))?/, async (msg, match) => {
     try {
       await bot.deleteMessage(msg.chat.id, messageId);
       deletedCount += 1;
-    } catch {}
+    } catch { }
   }
 
   if (deletedCount === 0) {
@@ -1246,7 +2038,224 @@ bot.on("message", (msg) => {
   if (!msg.text) return;
   registerUserInChat(msg);
   if (isPrivateChat(msg)) return;
-  if (msg.text.startsWith("/")) return;
 
+  if (!chatInfo.has(msg.chat.id)) {
+    chatInfo.set(msg.chat.id, {
+      joinedAt: formatDateTime(),
+      title: msg.chat.title || "Группа",
+      type: msg.chat.type,
+      users: []
+    });
+    saveChatInfo();
+  }
+
+  resetDailyStatsIfNeeded();
   addActivity(msg.from);
+  stats.messagesToday += 1;
+
+  if (!stats.chatMessagesToday || typeof stats.chatMessagesToday !== "object") {
+    stats.chatMessagesToday = {};
+  }
+
+  stats.chatMessagesToday[msg.chat.id] = (stats.chatMessagesToday[msg.chat.id] || 0) + 1;
+  saveStats();
+  saveUsers();
+  saveChatInfo();
+
+  const probabilityQuestion = parseProbabilityQuestion(msg.text);
+
+  if (probabilityQuestion) {
+    const percent = getRandomPercent();
+    bot.sendMessage(
+      msg.chat.id,
+      `🎲 Вероятность того, что ${probabilityQuestion}: ${percent}%`,
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
+  // --- "сливки брак" feature
+  const marriageMatch = msg.text.match(/^(?:сливки\s+брак|брак|\/brak)(?:\s+(.+))?$/i);
+
+  if (marriageMatch) {
+    const percent = getMarriagePercent();
+    const info = chatInfo.get(msg.chat.id);
+    const userName = getTelegramName(msg.from);
+    const currentPartnerId = getMarriagePartnerId(msg.chat.id, msg.from.id);
+
+    if (currentPartnerId) {
+      const currentPartner = users.get(currentPartnerId);
+      const currentPartnerName = currentPartner ? getUserDisplayName(currentPartner) : `ID:${currentPartnerId}`;
+
+      bot.sendMessage(
+        msg.chat.id,
+        `💍 ${userName} уже состоит в игровом браке.\n\n💞 Вторая половинка: ${currentPartnerName}\n\nЧтобы отменить: напиши "сливки развод"`,
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    let partnerId = null;
+    let partnerName = "";
+
+    if (msg.reply_to_message?.from) {
+      const partnerProfile = getUser(msg.reply_to_message.from);
+      registerUserInChat({ chat: msg.chat, from: msg.reply_to_message.from });
+      partnerId = partnerProfile.id;
+      partnerName = getUserDisplayName(partnerProfile);
+    } else if (marriageMatch[1]) {
+      const targetText = marriageMatch[1].trim();
+      const cleanTarget = targetText.replace("@", "");
+      const foundUser = findUserByUsername(cleanTarget);
+
+      if (foundUser) {
+        partnerId = foundUser.id;
+        partnerName = getUserDisplayName(foundUser);
+      } else {
+        partnerName = targetText;
+      }
+    } else if (info && Array.isArray(info.users) && info.users.length > 0) {
+      const availableUsers = info.users.filter((userId) => {
+        const profile = users.get(userId);
+        return userId !== msg.from.id && !profile?.isBot && !getMarriagePartnerId(msg.chat.id, userId);
+      });
+
+      if (availableUsers.length > 0) {
+        partnerId = availableUsers[Math.floor(Math.random() * availableUsers.length)];
+        const randomUser = users.get(partnerId);
+        partnerName = randomUser ? getUserDisplayName(randomUser) : `ID:${partnerId}`;
+      }
+    }
+
+    if (!partnerName || !partnerId) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💍 Пока не нашёл свободную пару для брака. Пусть участники напишут пару сообщений в группе.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    if (partnerId === msg.from.id) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💍 Самого себя выбрать нельзя.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const partnerProfileForCheck = users.get(partnerId);
+
+    if (partnerProfileForCheck?.isBot) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💍 Ботов нельзя выбирать для игрового брака.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const partnerCurrentPartnerId = getMarriagePartnerId(msg.chat.id, partnerId);
+
+    if (partnerCurrentPartnerId) {
+      const partnerCurrentPartner = users.get(partnerCurrentPartnerId);
+      const partnerCurrentPartnerName = partnerCurrentPartner ? getUserDisplayName(partnerCurrentPartner) : `ID:${partnerCurrentPartnerId}`;
+
+      bot.sendMessage(
+        msg.chat.id,
+        `💍 ${partnerName} уже состоит в игровом браке.\n\n💞 Его/её вторая половинка: ${partnerCurrentPartnerName}`,
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const proposalId = createMarriageProposal(
+      msg.chat.id,
+      msg.from.id,
+      partnerId,
+      percent
+    );
+
+    bot.sendMessage(
+      msg.chat.id,
+      `💍 ПРЕДЛОЖЕНИЕ БРАКА\n\n👤 Первая половинка: ${userName}\n💞 Вторая половинка: ${partnerName}\n\n❤️ Совместимость: ${percent}%\n\n${partnerName}, вы согласны?`,
+      {
+        reply_to_message_id: msg.message_id,
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "✅ Согласиться", callback_data: `marriage_accept:${proposalId}` },
+              { text: "❌ Отказаться", callback_data: `marriage_decline:${proposalId}` }
+            ]
+          ]
+        }
+      }
+    );
+    return;
+  }
+
+  // --- "сливки развод" feature
+  const divorceMatch = msg.text.match(/^(?:сливки\s+развод|развод|\/razvod)$/i);
+
+  if (divorceMatch) {
+    const partnerId = removeMarriage(msg.chat.id, msg.from.id);
+
+    if (!partnerId) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💔 Ты пока не состоишь в игровом браке.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const partner = users.get(partnerId);
+    const partnerName = partner ? getUserDisplayName(partner) : `ID:${partnerId}`;
+
+    bot.sendMessage(
+      msg.chat.id,
+      `💔 РАЗВОД ОФОРМЛЕН!\n\n${getTelegramName(msg.from)} и ${partnerName} больше не состоят в игровом браке.`,
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
+  // --- "сливки кто ...?" random user feature
+  const randomUserMatch = msg.text.match(/^сливки\s+кто\s+(.+?)\??$/i);
+
+  if (randomUserMatch) {
+    const trait = randomUserMatch[1].trim().replace(/\?+$/, "");
+    const info = chatInfo.get(msg.chat.id);
+
+    if (!trait) return;
+
+    if (!info || !Array.isArray(info.users) || info.users.length === 0) {
+      bot.sendMessage(
+        msg.chat.id,
+        "🎲 Пока не знаю участников этой группы.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const availableUsers = info.users.filter((userId) => {
+      const profile = users.get(userId);
+      return !profile?.isBot;
+    });
+
+    const pool = availableUsers.length > 0 ? availableUsers : info.users;
+    const randomUserId = pool[Math.floor(Math.random() * pool.length)];
+    const randomUser = users.get(randomUserId);
+
+    const name = randomUser
+      ? getUserDisplayName(randomUser)
+      : `ID:${randomUserId}`;
+
+    bot.sendMessage(
+      msg.chat.id,
+      `🎲 Кто ${trait}?\n\n${name}`,
+      { reply_to_message_id: msg.message_id }
+    );
+  }
 });
