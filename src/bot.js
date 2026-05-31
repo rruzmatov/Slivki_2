@@ -1,7 +1,4 @@
-require("dotenv").config({ path: "/home/container/.env" });
-
-console.log("TOKEN:", process.env.BOT_TOKEN);
-console.log("OWNER_IDS:", process.env.OWNER_IDS);
+require("dotenv").config();
 
 const TelegramBot = require("node-telegram-bot-api");
 
@@ -18,7 +15,7 @@ if (!botToken) {
 }
 
 const bot = new TelegramBot(botToken, { polling: true });
-const db = require("../database");
+const db = require("./database");
 
 console.log("🍦 Сливки Бот запущен");
 
@@ -257,7 +254,10 @@ const commandSettings = new Map([
   ["kick", true],
   ["ban", true],
   ["unban", true],
-  ["clear", true]
+  ["clear", true],
+  ["brak", true],
+  ["razvod", true],
+  ["partner", true]
 ]);
 
 let botUsername = "";
@@ -911,6 +911,10 @@ function getCommandsText() {
     "• /kick — кикнуть пользователя\n" +
     "• /ban — забанить пользователя\n" +
     "• /unban — разбанить пользователя\n\n" +
+    "💍 Игровые функции\n" +
+    "• /brak или брак — предложить игровой брак\n" +
+    "• /razvod или развод — оформить игровой развод\n" +
+    "• /partner или /партнер — показать вторую половинку\n\n" +
     "🧩 Использование\n" +
     "↩️ Ответом на сообщение\n" +
     "🏷 Через @username\n" +
@@ -1283,6 +1287,7 @@ bot.onText(/\/logs/, async (msg) => {
 
 bot.onText(/\/(partner|партнер)/i, (msg) => {
   registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "partner")) return;
 
   if (isPrivateChat(msg)) {
     bot.sendMessage(msg.chat.id, "💞 Добавь меня в группу, чтобы пользоваться командой /partner.");
@@ -2039,6 +2044,14 @@ bot.on("message", (msg) => {
   registerUserInChat(msg);
   if (isPrivateChat(msg)) return;
 
+  if (msg.text.match(/^(?:сливки\s+брак|брак|\/brak)(?:\s+(.+))?$/i) && !ensureCommandEnabled(msg, "brak")) {
+    return;
+  }
+
+  if (msg.text.match(/^(?:сливки\s+развод|развод|\/razvod)$/i) && !ensureCommandEnabled(msg, "razvod")) {
+    return;
+  }
+
   if (!chatInfo.has(msg.chat.id)) {
     chatInfo.set(msg.chat.id, {
       joinedAt: formatDateTime(),
@@ -2089,7 +2102,7 @@ bot.on("message", (msg) => {
 
       bot.sendMessage(
         msg.chat.id,
-        `💍 ${userName} уже состоит в игровом браке.\n\n💞 Вторая половинка: ${currentPartnerName}\n\nЧтобы отменить: напиши "сливки развод"`,
+        `💍 ${userName} уже состоит в игровом браке.\n\n💞 Вторая половинка: ${currentPartnerName}\n\nЧтобы отменить: напиши "развод" или /razvod`,
         { reply_to_message_id: msg.message_id }
       );
       return;
