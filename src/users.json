@@ -19,7 +19,7 @@
     "id": 6006255869,
     "firstName": "Ahrorbek",
     "username": "rruzmatov",
-    "messages": 91,
+    "messages": 138,
     "warnings": 0,
     "isBot": false
   },
@@ -36,6 +36,7 @@
     "firstName": "«СЛИВКИ »",
     "username": "slivksiss_bot",
     "messages": 0,
-    "warnings": 0
+    "warnings": 0,
+    "isBot": true
   }
 }

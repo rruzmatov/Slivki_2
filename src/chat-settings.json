@@ -1,0 +1,11 @@
+{
+  "rules": {},
+  "autoKickSettings": {},
+  "joinLeaveSettings": {
+    "-1003982008253": {
+      "joins": true,
+      "leaves": true,
+      "leaveMinMessages": 0
+    }
+  }
+}
