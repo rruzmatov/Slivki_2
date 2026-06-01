@@ -1,4 +1,12 @@
 {
+  "707693258": {
+    "id": 707693258,
+    "firstName": "Iris | Чат-менеджер",
+    "username": "iris_cm_bot",
+    "isBot": true,
+    "messages": 0,
+    "warnings": 0
+  },
   "1064530086": {
     "id": 1064530086,
     "firstName": "Alan",
@@ -11,7 +19,7 @@
     "id": 6006255869,
     "firstName": "Ahrorbek",
     "username": "rruzmatov",
-    "messages": 74,
+    "messages": 91,
     "warnings": 0,
     "isBot": false
   },

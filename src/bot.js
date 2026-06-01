@@ -15,7 +15,6 @@ if (!botToken) {
 }
 
 const bot = new TelegramBot(botToken, { polling: true });
-const db = require("./database");
 
 console.log("🍦 Сливки Бот запущен");
 
@@ -23,7 +22,15 @@ const users = new Map();
 const chatUsers = new Map();
 const muteTimers = new Map();
 const adminLogs = new Map();
+
 const pendingMarriages = new Map();
+const supportUsers = new Set();
+
+const chatRules = new Map();
+const waitingRulesInput = new Set();
+const autoKickSettings = new Map();
+const userLeftHistory = new Map();
+const joinLeaveSettings = new Map();
 
 const fs = require("fs");
 const path = require("path");
@@ -241,10 +248,13 @@ const commandSettings = new Map([
   ["menu", true],
   ["commands", true],
   ["profile", true],
+  ["top", true],
   ["admins", true],
   ["slowmode", true],
   ["lock", true],
   ["unlock", true],
+  ["chat", true],
+  ["topic", true],
   ["logs", true],
   ["stats", true],
   ["warn", true],
@@ -255,6 +265,20 @@ const commandSettings = new Map([
   ["ban", true],
   ["unban", true],
   ["clear", true],
+  ["pin", true],
+  ["unpin", true],
+  ["messageid", true],
+  ["settitle", true],
+  ["setdescription", true],
+  ["invite", true],
+  ["id", true],
+  ["chatinfo", true],
+  ["rules", true],
+  ["setrules", true],
+  ["resetlinks", true],
+  ["autokick", true],
+  ["tgadmin", true],
+  ["joinleave", true],
   ["brak", true],
   ["razvod", true],
   ["partner", true]
@@ -274,10 +298,13 @@ async function setupBotCommands() {
       { command: "menu", description: "📋 меню" },
       { command: "commands", description: "📜 все команды" },
       { command: "profile", description: "👤 профиль" },
+      { command: "top", description: "🏆 топ активных" },
       { command: "admins", description: "👑 список администраторов" },
       { command: "slowmode", description: "🐢 задержка сообщений" },
       { command: "lock", description: "🔒 закрыть чат" },
       { command: "unlock", description: "🔓 открыть чат" },
+      { command: "chat", description: "💬 +чат / -чат" },
+      { command: "topic", description: "🧵 +топик / -топик" },
       { command: "logs", description: "📋 логи админ-действий" },
       { command: "stats", description: "📊 статистика" },
       { command: "warn", description: "⚠️ предупреждение" },
@@ -287,6 +314,19 @@ async function setupBotCommands() {
       { command: "kick", description: "👢 кик" },
       { command: "ban", description: "🚫 бан" },
       { command: "unban", description: "✅ разбан" },
+      { command: "pin", description: "📌 закрепить сообщение" },
+      { command: "unpin", description: "📍 открепить сообщение" },
+      { command: "settitle", description: "✏️ изменить название чата" },
+      { command: "setdescription", description: "📝 описание чата" },
+      { command: "invite", description: "🔗 ссылка на чат" },
+      { command: "id", description: "🆔 информация об ID" },
+      { command: "chatinfo", description: "ℹ️ информация о чате" },
+      { command: "rules", description: "📜 правила группы" },
+      { command: "setrules", description: "✍️ установить правила" },
+      { command: "resetlinks", description: "♻️ сбросить ссылки" },
+      { command: "autokick", description: "👢 автокик после выхода" },
+      { command: "tgadmin", description: "👮 сетка +тг админ" },
+      { command: "joinleave", description: "👋 +входы / +выходы" },
       { command: "brak", description: "💍 Брак" },
       { command: "razvod", description: "💔 Развод" },
       { command: "partner", description: "💞 Вторая половинка" }
@@ -386,6 +426,18 @@ function getUserDisplayName(profile) {
     return `@${profile.username}`;
   }
   return profile.firstName || `ID:${profile.id}`;
+}
+
+function getJoinLeaveSettings(chatId) {
+  if (!joinLeaveSettings.has(chatId)) {
+    joinLeaveSettings.set(chatId, {
+      joins: true,
+      leaves: true,
+      leaveMinMessages: 0
+    });
+  }
+
+  return joinLeaveSettings.get(chatId);
 }
 
 function getStatusLabel(status) {
@@ -878,9 +930,20 @@ function getFullPermissions() {
 }
 
 function getGroupMenuText() {
-  return "🍦 Сливки Бот\n\n" +
-    "📋 Главное меню\n" +
+  return "✅ Я так рад, что меня добавили!\n\n" +
+    "Пока я признаю команды только админов этого чата.\n\n" +
+    "⚙️ Со списком всех команд можно ознакомиться в нашей статье.\n\n" +
+    "⚪️ В целях безопасности от спама в чате по умолчанию установлен лимит одновременных инвайтов в 30 человек.\n\n" +
+    "— Если вы хотите изменить этот лимит, введите:\n" +
+    "инвайты {число}\n\n" +
+    "Где число может быть 0 — это отключит лимит.\n\n" +
+    "Остались вопросы? Можете обратиться в наш официальный чат.";
+}
+
+function getMainMenuText() {
+  return "📋 Главное меню\n" +
     "👤 Профиль: /profile\n" +
+    "🏆 Топ: /top\n" +
     "🛡 Модерация: /commands\n\n" +
     "✨ Быстрые действия\n" +
     "⚠️ /warn — предупреждение\n" +
@@ -893,7 +956,8 @@ function getGroupMenuText() {
 function getCommandsText() {
   return "📜 Commands • Список команд\n\n" +
     "👤 Пользователь\n" +
-    "• /profile — профиль пользователя\n\n" +
+    "• /profile — профиль пользователя\n" +
+    "• /top — топ активных участников\n\n" +
     "📌 Информация\n" +
     "• /menu — главное меню\n" +
     "• /commands — список команд\n" +
@@ -901,8 +965,24 @@ function getCommandsText() {
     "• /slowmode 10 — задержка сообщений\n" +
     "• /lock — закрыть чат\n" +
     "• /unlock — открыть чат\n" +
+    "• +чат / -чат — открыть или закрыть чат\n" +
+    "• +топик / -топик — открыть или закрыть текущий топик\n" +
     "• /logs — логи админ-действий\n" +
-    "• /stats — статистика группы\n\n" +
+    "• /stats — статистика группы\n" +
+    "• /settitle Название — изменить название чата\n" +
+    "• /setdescription Текст — изменить описание чата\n" +
+    "• /invite — получить ссылку-приглашение\n" +
+    "• /id — ID пользователя или сообщения\n" +
+    "• /chatinfo — информация о группе\n" +
+    "• /rules — правила группы\n" +
+    "• /setrules — установить правила\n" +
+    "• /resetlinks — сбросить ссылки\n" +
+    "• /autokick — автокик после выхода участника\n" +
+    "• Сетка +тг админ [должность] @username/ID — выдать админку во всех известных чатах\n" +
+    "• +входы / -входы — уведомления о входах\n" +
+    "• +выходы / -выходы — уведомления о выходах\n" +
+    "• +входы-выходы / -входы-выходы — оба типа уведомлений\n" +
+    "• +выходы {число} — порог сообщений для уведомлений о выходе\n\n" +
     "🛡 Модерация\n" +
     "• /warn — выдать предупреждение\n" +
     "• /unwarn — снять предупреждения\n" +
@@ -910,7 +990,10 @@ function getCommandsText() {
     "• /unmute — снять мут\n" +
     "• /kick — кикнуть пользователя\n" +
     "• /ban — забанить пользователя\n" +
-    "• /unban — разбанить пользователя\n\n" +
+    "• /unban — разбанить пользователя\n" +
+    "• /pin или !пин — закрепить сообщение\n" +
+    "• /unpin или !анпин — открепить сообщение\n" +
+    "• смс ид — узнать ID сообщения\n\n" +
     "💍 Игровые функции\n" +
     "• /brak или брак — предложить игровой брак\n" +
     "• /razvod или развод — оформить игровой развод\n" +
@@ -925,11 +1008,58 @@ function getCommandsText() {
     "/kick @username";
 }
 
+function getHelpText() {
+  return "🆘 Как пользоваться командами\n\n" +
+    "✅ Самый удобный способ — ответом на сообщение пользователя.\n\n" +
+    "1️⃣ Ответом на сообщение\n" +
+    "Нажми на сообщение пользователя → Ответить → напиши команду:\n\n" +
+    "/warn — выдать предупреждение\n" +
+    "/mute 10m — дать мут на 10 минут\n" +
+    "/unmute — снять мут\n" +
+    "/kick — кикнуть из группы\n" +
+    "/ban — забанить\n\n" +
+    "/pin — закрепить сообщение\n" +
+    "/unpin — открепить сообщение\n" +
+    "смс ид — узнать ID сообщения\n\n" +
+    "2️⃣ Через username\n" +
+    "Если у пользователя есть username:\n\n" +
+    "/warn @username\n" +
+    "/mute @username 10m\n" +
+    "/ban @username\n\n" +
+    "⚠️ Важно: через @username команда работает только если бот уже видел этого пользователя в группе.\n\n" +
+    "3️⃣ Через Telegram ID\n" +
+    "Если знаешь ID пользователя:\n\n" +
+    "/warn 123456789\n" +
+    "/mute 123456789 10m\n" +
+    "/ban 123456789\n\n" +
+    "📌 Закрепление сообщений\n" +
+    "Ответь на сообщение и напиши:\n" +
+    "/pin или !пин\n\n" +
+    "Или закрепи по ID сообщения:\n" +
+    "/pin 1234 или !пин 1234\n\n" +
+    "Чтобы узнать ID сообщения, ответь на него текстом:\n" +
+    "смс ид\n\n" +
+    "Открепить сообщение:\n" +
+    "/unpin или !анпин\n\n" +
+    "⏰ Формат времени для мута\n" +
+    "1s — 1 секунда\n" +
+    "1m — 1 минута\n" +
+    "1d — 1 день\n\n" +
+    "Примеры:\n" +
+    "/mute 10m\n" +
+    "/mute @username 1d\n\n" +
+    "📋 Полный список команд: /commands\n" +
+    "📌 Главное меню: /menu";
+}
+
 
 function getGroupKeyboard() {
   return {
     reply_markup: {
-      remove_keyboard: true
+      inline_keyboard: [
+        [{ text: "📜 Статья с командами", url: "https://t.me/slivki_bot" }],
+        [{ text: "💬 Официальный чат", url: "https://t.me/slivki_chat" }]
+      ]
     }
   };
 }
@@ -940,7 +1070,7 @@ function getRandomPercent() {
 
 function parseProbabilityQuestion(text) {
   const cleanText = text.trim();
-  const match = cleanText.match(/^сливки\s+(?:вероятность|шанс)\s*(?:того\s*)?(?:что\s*)?(.+)$/i);
+  const match = cleanText.match(/^(?:сливки\s+)?(?:вероятность|шанс|про)\s*(?:того\s*)?(?:что\s*)?(.+)$/i);
 
   if (!match) return null;
 
@@ -977,6 +1107,12 @@ bot.onText(/\/start/, async (msg) => {
                 text: "➕ Добавить в группу",
                 url: `https://t.me/${botUsername}?startgroup=true`
               }
+            ],
+            [
+              {
+                text: "💬 Поддержка",
+                callback_data: "support_open"
+              }
             ]
           ]
         }
@@ -987,7 +1123,7 @@ bot.onText(/\/start/, async (msg) => {
 
   bot.sendMessage(
     msg.chat.id,
-    "🍦 Сливки Бот успешно активирован!\n\n" + getGroupMenuText(),
+    getGroupMenuText(),
     getGroupKeyboard()
   );
 });
@@ -1010,6 +1146,18 @@ bot.on("callback_query", async (query) => {
   const chatId = query.message?.chat?.id;
   const messageId = query.message?.message_id;
   const userId = query.from?.id;
+
+  if (data === "support_open") {
+    supportUsers.add(userId);
+
+    await bot.sendMessage(
+      query.message.chat.id,
+      "💬 Напишите ваше сообщение. Оно будет отправлено владельцу бота."
+    );
+
+    await bot.answerCallbackQuery(query.id);
+    return;
+  }
   if (data.startsWith("marriage_accept:") || data.startsWith("marriage_decline:")) {
     const [action, proposalId] = data.split(":");
     const proposal = pendingMarriages.get(proposalId);
@@ -1194,7 +1342,7 @@ bot.onText(/\/menu/, (msg) => {
     return;
   }
 
-  bot.sendMessage(msg.chat.id, getGroupMenuText(), getGroupKeyboard());
+  bot.sendMessage(msg.chat.id, getMainMenuText());
 });
 
 bot.onText(/\/help/, (msg) => {
@@ -1209,7 +1357,7 @@ bot.onText(/\/help/, (msg) => {
     return;
   }
 
-  bot.sendMessage(msg.chat.id, getGroupMenuText(), getGroupKeyboard());
+  bot.sendMessage(msg.chat.id, getHelpText());
 });
 
 bot.onText(/\/commands/, (msg) => {
@@ -1263,6 +1411,41 @@ bot.onText(/\/profile/, async (msg) => {
     `⚠️ Предупреждения: ${profile.warnings}/3`;
 
   bot.sendMessage(msg.chat.id, profileText);
+});
+
+// /top command handler
+bot.onText(/\/top/, (msg) => {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "🏆 Добавь меня в группу, чтобы посмотреть топ участников.");
+    return;
+  }
+
+  const info = chatInfo.get(msg.chat.id);
+
+  if (!info || !Array.isArray(info.users) || info.users.length === 0) {
+    bot.sendMessage(msg.chat.id, "🏆 Пока недостаточно данных для топа.");
+    return;
+  }
+
+  const topUsers = info.users
+    .map((userId) => users.get(userId))
+    .filter(Boolean)
+    .filter((user) => !user.isBot)
+    .sort((a, b) => (b.messages || 0) - (a.messages || 0))
+    .slice(0, 10);
+
+  if (topUsers.length === 0) {
+    bot.sendMessage(msg.chat.id, "🏆 Пока нет активных участников.");
+    return;
+  }
+
+  const text = "🏆 ТОП АКТИВНЫХ УЧАСТНИКОВ\n\n" + topUsers
+    .map((user, index) => `${index + 1}. ${getUserDisplayName(user)} — ${user.messages || 0} сообщений`)
+    .join("\n");
+
+  bot.sendMessage(msg.chat.id, text);
 });
 
 
@@ -1352,6 +1535,7 @@ bot.onText(/\/lock/, async (msg) => {
   }
 });
 
+
 bot.onText(/\/unlock/, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "unlock")) return;
@@ -1389,6 +1573,87 @@ bot.onText(/\/unlock/, async (msg) => {
       msg.chat.id,
       `⚠️ Не удалось открыть чат.\n\nПричина: ${error.message || "неизвестная ошибка"}`
     );
+  }
+});
+
+// +чат / -чат
+bot.onText(/^([+-])\s*(?:чат|chat)$/i, async (msg, match) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "chat")) return;
+
+  if (isPrivateChat(msg)) return;
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Только админы могут открывать или закрывать чат.");
+    return;
+  }
+
+  const botCanChangePermissions = await canBotChangeSlowMode(msg.chat.id);
+
+  if (!botCanChangePermissions) {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Я не могу изменить права чата. Дай боту права администратора на ограничение участников."
+    );
+    return;
+  }
+
+  try {
+    const slowModeDelay = await getCurrentSlowModeDelay(msg.chat.id);
+
+    if (match[1] === "-") {
+      await bot.setChatPermissions(msg.chat.id, getLockedChatPermissions(slowModeDelay));
+      addAdminLog(msg.chat.id, "🔒 Закрыл чат", msg.from, "Вся группа", "Команда -чат");
+      bot.sendMessage(msg.chat.id, "🔒 Чат закрыт. Обычные участники больше не могут писать.");
+      return;
+    }
+
+    await bot.setChatPermissions(msg.chat.id, getUnlockedChatPermissions(slowModeDelay));
+    addAdminLog(msg.chat.id, "🔓 Открыл чат", msg.from, "Вся группа", "Команда +чат");
+    bot.sendMessage(msg.chat.id, "🔓 Чат открыт. Обычные участники снова могут писать.");
+  } catch (error) {
+    bot.sendMessage(msg.chat.id, "⚠️ Не получилось изменить права чата.");
+  }
+});
+
+// +топик / -топик
+bot.onText(/^([+-])\s*(?:топик|topic)$/i, async (msg, match) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "topic")) return;
+
+  if (isPrivateChat(msg)) return;
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Только админы могут открывать или закрывать топики.");
+    return;
+  }
+
+  if (!msg.message_thread_id) {
+    bot.sendMessage(msg.chat.id, "🧵 Эта команда работает только внутри топика/темы.");
+    return;
+  }
+
+  try {
+    if (match[1] === "-") {
+      await bot.closeForumTopic(msg.chat.id, msg.message_thread_id);
+      addAdminLog(msg.chat.id, "🔒 Закрыл топик", msg.from, `Topic:${msg.message_thread_id}`, "Команда -топик");
+      bot.sendMessage(msg.chat.id, "🔒 Топик закрыт. Обычные участники больше не могут писать в этой теме.", {
+        message_thread_id: msg.message_thread_id
+      });
+      return;
+    }
+
+    await bot.reopenForumTopic(msg.chat.id, msg.message_thread_id);
+    addAdminLog(msg.chat.id, "🔓 Открыл топик", msg.from, `Topic:${msg.message_thread_id}`, "Команда +топик");
+    bot.sendMessage(msg.chat.id, "🔓 Топик открыт. Участники снова могут писать в этой теме.", {
+      message_thread_id: msg.message_thread_id
+    });
+  } catch (error) {
+    bot.sendMessage(msg.chat.id, "⚠️ Не получилось изменить топик. Проверь, что это форум-группа и у бота есть права управления темами.");
   }
 });
 
@@ -1579,11 +1844,183 @@ bot.onText(/\/slowmode(?:\s+(.+))?/i, async (msg, match) => {
 });
 
 
-bot.on("left_chat_member", (msg) => {
+bot.on("left_chat_member", async (msg) => {
   if (!msg.left_chat_member) return;
 
-  const name = getTelegramName(msg.left_chat_member);
-  bot.sendMessage(msg.chat.id, `👋 ${name} покинул(а) группу`);
+  const leftUser = msg.left_chat_member;
+  const name = getTelegramName(leftUser);
+  const setting = autoKickSettings.get(msg.chat.id);
+
+  const notifySettings = getJoinLeaveSettings(msg.chat.id);
+  const leftProfile = users.get(leftUser.id);
+  const leftMessages = leftProfile?.messages || 0;
+
+  if (notifySettings.leaves && leftMessages >= notifySettings.leaveMinMessages) {
+    bot.sendMessage(msg.chat.id, `👋 ${name} покинул(а) группу`);
+  }
+
+  if (!setting || setting.enabled !== true) return;
+  if (leftUser.is_bot) return;
+
+  const key = `${msg.chat.id}:${leftUser.id}`;
+  const now = Date.now();
+  const timeLimitMs = setting.time * 1000;
+
+  const history = (userLeftHistory.get(key) || []).filter((time) => now - time <= timeLimitMs);
+  history.push(now);
+  userLeftHistory.set(key, history);
+
+  if (history.length < setting.count) return;
+
+  try {
+    if (setting.action === "ban") {
+      await bot.banChatMember(msg.chat.id, leftUser.id);
+      bot.sendMessage(msg.chat.id, `🚫 ${name} забанен за частые выходы из чата.`);
+      addAdminLog(msg.chat.id, "🚫 Автобан за выходы", { id: bot.id, first_name: "Сливки Бот" }, name, `Выходов: ${history.length}/${setting.count}`);
+    } else {
+      await bot.banChatMember(msg.chat.id, leftUser.id, {
+        until_date: Math.floor(Date.now() / 1000) + 40
+      });
+
+      setTimeout(() => {
+        bot.unbanChatMember(msg.chat.id, leftUser.id, { only_if_banned: true }).catch(() => { });
+      }, 1000);
+
+      bot.sendMessage(msg.chat.id, `👢 ${name} кикнут за частые выходы из чата.`);
+      addAdminLog(msg.chat.id, "👢 Автокик за выходы", { id: bot.id, first_name: "Сливки Бот" }, name, `Выходов: ${history.length}/${setting.count}`);
+    }
+
+    userLeftHistory.delete(key);
+  } catch (error) {
+    bot.sendMessage(msg.chat.id, "⚠️ Автокик не сработал. Проверь, что бот админ и может банить участников.");
+  }
+});
+
+bot.onText(/^([+-])\s*(входы|выходы|входы-выходы)(?:\s+(\d+))?$/i, async (msg, match) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "joinleave")) return;
+
+  if (isPrivateChat(msg)) return;
+
+  const isAdmin = await canUseAdminCommands(msg.chat.id, msg.from.id);
+  if (!isAdmin) {
+    bot.sendMessage(msg.chat.id, "⛔ Только админы могут настраивать входы и выходы.");
+    return;
+  }
+
+  const settings = getJoinLeaveSettings(msg.chat.id);
+  const sign = match[1];
+  const type = match[2].toLowerCase();
+  const count = match[3] ? Number(match[3]) : null;
+
+  if (type === "входы") {
+    settings.joins = sign === "+";
+    bot.sendMessage(msg.chat.id, settings.joins ? "✅ Входы включены." : "❌ Входы отключены.");
+    return;
+  }
+
+  if (type === "выходы") {
+    settings.leaves = sign === "+";
+
+    if (count !== null) {
+      settings.leaveMinMessages = count;
+      settings.leaves = true;
+      bot.sendMessage(msg.chat.id, `✅ Выходы включены.\nПорог: ${count} сообщений.`);
+      return;
+    }
+
+    bot.sendMessage(msg.chat.id, settings.leaves ? "✅ Выходы включены." : "❌ Выходы отключены.");
+    return;
+  }
+
+  const enabled = sign === "+";
+  settings.joins = enabled;
+  settings.leaves = enabled;
+
+  bot.sendMessage(
+    msg.chat.id,
+    enabled ? "✅ Входы и выходы включены." : "❌ Входы и выходы отключены."
+  );
+});
+
+bot.onText(/^(?:\/autokick|автокик)(?:\s+(.*))?$/i, async (msg, match) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "autokick")) return;
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "👢 Добавь меня в группу, чтобы пользоваться автокиком.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Только админы могут настраивать автокик.");
+    return;
+  }
+
+  const value = (match[1] || "").trim().toLowerCase();
+
+  if (!value) {
+    const current = autoKickSettings.get(msg.chat.id);
+
+    if (!current || current.enabled !== true) {
+      bot.sendMessage(
+        msg.chat.id,
+        "👢 Автокик выключен.\n\nИспользование:\nавтокик 3 60 кик\nавтокик 3 60 бан\n/autokick off\n\nГде:\n3 — количество выходов\n60 — время в секундах\nкик или бан — наказание"
+      );
+      return;
+    }
+
+    bot.sendMessage(
+      msg.chat.id,
+      `👢 Автокик включён.\n\nВыходов: ${current.count}\nВремя: ${current.time} сек.\nНаказание: ${current.action === "ban" ? "бан" : "кик"}`
+    );
+    return;
+  }
+
+  if (["off", "выкл", "0"].includes(value)) {
+    autoKickSettings.delete(msg.chat.id);
+    bot.sendMessage(msg.chat.id, "✅ Автокик выключен.");
+    return;
+  }
+
+  if (["on", "вкл"].includes(value)) {
+    autoKickSettings.set(msg.chat.id, {
+      enabled: true,
+      count: 3,
+      time: 60,
+      action: "kick"
+    });
+
+    bot.sendMessage(msg.chat.id, "✅ Автокик включён.\n\nПо умолчанию: 3 выхода за 60 секунд → кик.");
+    return;
+  }
+
+  const parts = value.split(/\s+/);
+  const count = Number(parts[0]);
+  const time = Number(parts[1]);
+  const action = parts[2];
+
+  if (!Number.isInteger(count) || count < 1 || !Number.isInteger(time) || time < 1 || !["кик", "kick", "бан", "ban"].includes(action)) {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Неверный формат.\n\nПример:\nавтокик 3 60 кик\nавтокик 3 60 бан\n\nГде 3 — количество выходов, 60 — секунды."
+    );
+    return;
+  }
+
+  autoKickSettings.set(msg.chat.id, {
+    enabled: true,
+    count,
+    time,
+    action: ["бан", "ban"].includes(action) ? "ban" : "kick"
+  });
+
+  bot.sendMessage(
+    msg.chat.id,
+    `✅ Автокик настроен.\n\nЕсли участник выйдет ${count} раз за ${time} сек., будет: ${["бан", "ban"].includes(action) ? "бан" : "кик"}.`
+  );
 });
 
 bot.on("my_chat_member", (update) => {
@@ -1605,6 +2042,10 @@ bot.on("my_chat_member", (update) => {
     chatInfo.delete(chatId);
     chatUsers.delete(chatId);
     saveChatInfo();
+  }
+
+  if (["member", "administrator"].includes(newStatus) && !["member", "administrator"].includes(oldStatus)) {
+    bot.sendMessage(chatId, getGroupMenuText(), getGroupKeyboard());
   }
 
   if (oldStatus !== "administrator" && newStatus === "administrator") {
@@ -2039,6 +2480,90 @@ bot.onText(/\/(clear|claer)(?:\s+(\d+))?/, async (msg, match) => {
   bot.sendMessage(msg.chat.id, `🧹 Удалено сообщений: ${deletedCount}`);
 });
 
+bot.onText(/^(?:\/pin|!пин|!pin)(?:\s+(\d+))?$/i, async (msg, match) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "pin")) return;
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "📌 Добавь меня в группу, чтобы пользоваться закреплением сообщений.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете закреплять сообщения.");
+    return;
+  }
+
+  let targetMessageId = null;
+
+  if (msg.reply_to_message) {
+    targetMessageId = msg.reply_to_message.message_id;
+  } else if (match[1]) {
+    targetMessageId = Number(match[1]);
+  }
+
+  if (!targetMessageId) {
+    bot.sendMessage(
+      msg.chat.id,
+      "📌 Чтобы закрепить сообщение, ответь на него командой /pin или !пин.\n\nТакже можно по ID:\n/pin 1234\n!пин 1234\n\nЧтобы узнать ID, ответь на сообщение текстом: смс ид"
+    );
+    return;
+  }
+
+  try {
+    await bot.pinChatMessage(msg.chat.id, targetMessageId, {
+      disable_notification: false
+    });
+
+    addAdminLog(msg.chat.id, "📌 Закрепил сообщение", msg.from, `ID:${targetMessageId}`);
+    bot.sendMessage(msg.chat.id, `📌 Сообщение закреплено.\nID: ${targetMessageId}`);
+  } catch (error) {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Не получилось закрепить сообщение. Проверь, что бот админ и у него есть право закреплять сообщения."
+    );
+  }
+});
+
+bot.onText(/^(?:\/unpin|!анпин|!unpin)(?:\s+(\d+))?$/i, async (msg, match) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "unpin")) return;
+
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "📍 Добавь меня в группу, чтобы пользоваться откреплением сообщений.");
+    return;
+  }
+
+  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
+
+  if (!senderCanUseAdminCommands) {
+    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете откреплять сообщения.");
+    return;
+  }
+
+  const targetMessageId = msg.reply_to_message ? msg.reply_to_message.message_id : match[1] ? Number(match[1]) : null;
+
+  try {
+    if (targetMessageId) {
+      await bot.unpinChatMessage(msg.chat.id, { message_id: targetMessageId });
+      addAdminLog(msg.chat.id, "📍 Открепил сообщение", msg.from, `ID:${targetMessageId}`);
+      bot.sendMessage(msg.chat.id, `📍 Сообщение откреплено.\nID: ${targetMessageId}`);
+      return;
+    }
+
+    await bot.unpinChatMessage(msg.chat.id);
+    addAdminLog(msg.chat.id, "📍 Открепил последнее закреплённое сообщение", msg.from, "Чат");
+    bot.sendMessage(msg.chat.id, "📍 Последнее закреплённое сообщение откреплено.");
+  } catch (error) {
+    bot.sendMessage(
+      msg.chat.id,
+      "⚠️ Не получилось открепить сообщение. Проверь, что бот админ и у него есть право закреплять сообщения."
+    );
+  }
+});
+
 bot.on("message", (msg) => {
   if (!msg.text) return;
   registerUserInChat(msg);
@@ -2049,6 +2574,19 @@ bot.on("message", (msg) => {
   }
 
   if (msg.text.match(/^(?:сливки\s+развод|развод|\/razvod)$/i) && !ensureCommandEnabled(msg, "razvod")) {
+    return;
+  }
+
+  if (/^(?:смс\s*ид|sms\s*id|message\s*id)$/i.test(msg.text.trim())) {
+    if (!ensureCommandEnabled(msg, "messageid")) return;
+
+    const targetMessageId = msg.reply_to_message ? msg.reply_to_message.message_id : msg.message_id;
+
+    bot.sendMessage(
+      msg.chat.id,
+      `🧾 ID сообщения: ${targetMessageId}`,
+      { reply_to_message_id: msg.message_id }
+    );
     return;
   }
 
@@ -2163,52 +2701,42 @@ bot.on("message", (msg) => {
     if (partnerProfileForCheck?.isBot) {
       bot.sendMessage(
         msg.chat.id,
-        "💍 Ботов нельзя выбирать для игрового брака.",
+        "💍 Ботов нельзя выбирать для брака.",
         { reply_to_message_id: msg.message_id }
       );
       return;
     }
 
-    const partnerCurrentPartnerId = getMarriagePartnerId(msg.chat.id, partnerId);
-
-    if (partnerCurrentPartnerId) {
-      const partnerCurrentPartner = users.get(partnerCurrentPartnerId);
-      const partnerCurrentPartnerName = partnerCurrentPartner ? getUserDisplayName(partnerCurrentPartner) : `ID:${partnerCurrentPartnerId}`;
-
+    if (getMarriagePartnerId(msg.chat.id, partnerId)) {
       bot.sendMessage(
         msg.chat.id,
-        `💍 ${partnerName} уже состоит в игровом браке.\n\n💞 Его/её вторая половинка: ${partnerCurrentPartnerName}`,
+        `💍 ${partnerName} уже состоит в игровом браке.`,
         { reply_to_message_id: msg.message_id }
       );
       return;
     }
 
-    const proposalId = createMarriageProposal(
-      msg.chat.id,
-      msg.from.id,
-      partnerId,
-      percent
-    );
+    const proposalId = createMarriageProposal(msg.chat.id, msg.from.id, partnerId, percent);
 
     bot.sendMessage(
       msg.chat.id,
-      `💍 ПРЕДЛОЖЕНИЕ БРАКА\n\n👤 Первая половинка: ${userName}\n💞 Вторая половинка: ${partnerName}\n\n❤️ Совместимость: ${percent}%\n\n${partnerName}, вы согласны?`,
+      `💍 ПРЕДЛОЖЕНИЕ БРАКА\n\n👤 ${userName} предлагает игровой брак пользователю ${partnerName}.\n\n❤️ Совместимость: ${percent}%\n\n${partnerName}, примите предложение?`,
       {
         reply_to_message_id: msg.message_id,
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "✅ Согласиться", callback_data: `marriage_accept:${proposalId}` },
+              { text: "✅ Принять", callback_data: `marriage_accept:${proposalId}` },
               { text: "❌ Отказаться", callback_data: `marriage_decline:${proposalId}` }
             ]
           ]
         }
       }
     );
+
     return;
   }
 
-  // --- "сливки развод" feature
   const divorceMatch = msg.text.match(/^(?:сливки\s+развод|развод|\/razvod)$/i);
 
   if (divorceMatch) {
@@ -2217,7 +2745,7 @@ bot.on("message", (msg) => {
     if (!partnerId) {
       bot.sendMessage(
         msg.chat.id,
-        "💔 Ты пока не состоишь в игровом браке.",
+        "💔 У тебя пока нет игрового брака.",
         { reply_to_message_id: msg.message_id }
       );
       return;
@@ -2228,47 +2756,34 @@ bot.on("message", (msg) => {
 
     bot.sendMessage(
       msg.chat.id,
-      `💔 РАЗВОД ОФОРМЛЕН!\n\n${getTelegramName(msg.from)} и ${partnerName} больше не состоят в игровом браке.`,
+      `💔 Игровой брак расторгнут.\n\n${getTelegramName(msg.from)} и ${partnerName} больше не вместе.`,
       { reply_to_message_id: msg.message_id }
     );
     return;
   }
+});
 
-  // --- "сливки кто ...?" random user feature
-  const randomUserMatch = msg.text.match(/^сливки\s+кто\s+(.+?)\??$/i);
+bot.on("message", async (msg) => {
+  if (!isPrivateChat(msg)) return;
+  if (!msg.text) return;
+  if (msg.text.startsWith("/")) return;
+  if (!supportUsers.has(msg.from.id)) return;
 
-  if (randomUserMatch) {
-    const trait = randomUserMatch[1].trim().replace(/\?+$/, "");
-    const info = chatInfo.get(msg.chat.id);
+  supportUsers.delete(msg.from.id);
 
-    if (!trait) return;
+  const sender = getTelegramName(msg.from);
 
-    if (!info || !Array.isArray(info.users) || info.users.length === 0) {
-      bot.sendMessage(
-        msg.chat.id,
-        "🎲 Пока не знаю участников этой группы.",
-        { reply_to_message_id: msg.message_id }
+  for (const ownerId of ownerIds) {
+    try {
+      await bot.sendMessage(
+        ownerId,
+        `📩 Новое обращение в поддержку\n\n👤 От: ${sender}\n🆔 ID: ${msg.from.id}\n\n💬 Сообщение:\n${msg.text}`
       );
-      return;
-    }
-
-    const availableUsers = info.users.filter((userId) => {
-      const profile = users.get(userId);
-      return !profile?.isBot;
-    });
-
-    const pool = availableUsers.length > 0 ? availableUsers : info.users;
-    const randomUserId = pool[Math.floor(Math.random() * pool.length)];
-    const randomUser = users.get(randomUserId);
-
-    const name = randomUser
-      ? getUserDisplayName(randomUser)
-      : `ID:${randomUserId}`;
-
-    bot.sendMessage(
-      msg.chat.id,
-      `🎲 Кто ${trait}?\n\n${name}`,
-      { reply_to_message_id: msg.message_id }
-    );
+    } catch {}
   }
+
+  await bot.sendMessage(
+    msg.chat.id,
+    "✅ Ваше сообщение отправлено в поддержку."
+  );
 });
