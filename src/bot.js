@@ -53,6 +53,9 @@ const PREMIUM_EMOJI = {
   kiss: getPremiumEmojiId("kiss"),
   hit: getPremiumEmojiId("hit"),
   kill: getPremiumEmojiId("kill"),
+  shield: getPremiumEmojiId("shield"),
+  dragon: getPremiumEmojiId("dragon"),
+  rocket: getPremiumEmojiId("rocket"),
   success: getPremiumEmojiId("success"),
   error: getPremiumEmojiId("error"),
   top: getPremiumEmojiId("top"),
@@ -85,6 +88,9 @@ const PREMIUM_EMOJI_FALLBACK = {
   kiss: "💋",
   hit: "👊",
   kill: "🎭",
+  shield: "🛡️",
+  dragon: "🐉",
+  rocket: "🚀",
   success: "✅",
   error: "❌",
   top: "🏆",
@@ -175,6 +181,18 @@ function rememberRpCommandPremiumEmojiId(commandName, customEmojiId) {
 }
 
 // Достаёт все custom_emoji entities из text/caption сообщения Telegram.
+function getCustomEmojiIdsFromMessage(message) {
+  const text = message?.text || message?.caption || "";
+  const entities = message?.entities || message?.caption_entities || [];
+
+  return entities
+    .filter((entity) => entity.type === "custom_emoji" && entity.custom_emoji_id)
+    .map((entity) => ({
+      emoji: text.slice(entity.offset, entity.offset + entity.length),
+      customEmojiId: entity.custom_emoji_id
+    }));
+}
+
 function extractCustomEmojiEntities(msg) {
   if (!msg) return [];
 
@@ -880,21 +898,21 @@ const RP_COMMANDS = {
   "удар": { emoji: PREMIUM_EMOJI_FALLBACK.hit, customEmojiId: PREMIUM_EMOJI.hit, actionText: "ударил" },
   "ударить": { emoji: PREMIUM_EMOJI_FALLBACK.hit, customEmojiId: PREMIUM_EMOJI.hit, actionText: "ударил" },
   "убить": { emoji: PREMIUM_EMOJI_FALLBACK.kill, customEmojiId: PREMIUM_EMOJI.kill, actionText: "убил" },
-  "пнуть": { emoji: "🦵", customEmojiId: "", actionText: "пнул" },
+  "пнуть": { emoji: "🦵", customEmojiId: PREMIUM_EMOJI.kick, actionText: "пнул" },
   "толкнуть": { emoji: "🤜", customEmojiId: "", actionText: "толкнул" },
   "обнять": { emoji: PREMIUM_EMOJI_FALLBACK.hug, customEmojiId: PREMIUM_EMOJI.hug, actionText: "обнял" },
   "поцеловать": { emoji: PREMIUM_EMOJI_FALLBACK.kiss, customEmojiId: PREMIUM_EMOJI.kiss, actionText: "поцеловал" },
   "погладить": { emoji: "🐱", customEmojiId: "", actionText: "погладил" },
   "укусить": { emoji: "😈", customEmojiId: "", actionText: "укусил" },
   "ущипнуть": { emoji: "👌", customEmojiId: "", actionText: "ущипнул" },
-  "защитить": { emoji: "🛡️", customEmojiId: "", actionText: "защитил" },
-  "спасти": { emoji: "❤️", customEmojiId: "", actionText: "спас" },
+  "защитить": { emoji: PREMIUM_EMOJI_FALLBACK.shield, customEmojiId: PREMIUM_EMOJI.shield, actionText: "защитил" },
+  "спасти": { emoji: PREMIUM_EMOJI_FALLBACK.heart, customEmojiId: PREMIUM_EMOJI.heart, actionText: "спас" },
   "поддержать": { emoji: "🤝", customEmojiId: "", actionText: "поддержал" },
   "похвалить": { emoji: "🌟", customEmojiId: "", actionText: "похвалил" },
   "накормить": { emoji: "🍽️", customEmojiId: "", actionText: "накормил" },
   "напоить": { emoji: "🥤", customEmojiId: "", actionText: "напоил" },
   "угостить": { emoji: "🍬", customEmojiId: "", actionText: "угостил" },
-  "подарить": { emoji: "🎁", customEmojiId: "", actionText: "подарил подарок" },
+  "подарить": { emoji: PREMIUM_EMOJI_FALLBACK.gift, customEmojiId: PREMIUM_EMOJI.gift, actionText: "подарил подарок" },
   "рассмешить": { emoji: "😂", customEmojiId: "", actionText: "рассмешил" },
   "развеселить": { emoji: "🥳", customEmojiId: "", actionText: "развеселил" },
   "удивить": { emoji: "😲", customEmojiId: "", actionText: "удивил" },
@@ -924,7 +942,7 @@ const RP_COMMANDS = {
   "превратить": { emoji: "🐸", customEmojiId: "", actionText: "превратил" },
   "телепортировать": { emoji: "🌀", customEmojiId: "", actionText: "телепортировал" },
   "воскресить": { emoji: "💫", customEmojiId: "", actionText: "воскресил" },
-  "призвать дракона": { emoji: "🐉", customEmojiId: "", actionText: "призвал дракона" },
+  "призвать дракона": { emoji: PREMIUM_EMOJI_FALLBACK.dragon, customEmojiId: PREMIUM_EMOJI.dragon, actionText: "призвал дракона" },
   "призвать феникса": { emoji: "🔥", customEmojiId: "", actionText: "призвал феникса" },
   "призвать хомяков": { emoji: "🐹", customEmojiId: "", actionText: "призвал хомяков" },
   "призвать пингвинов": { emoji: "🐧", customEmojiId: "", actionText: "призвал пингвинов" },
@@ -949,7 +967,7 @@ const RP_COMMANDS = {
   "сделать npc": { emoji: "🤖", customEmojiId: "", actionText: "сделал NPC" },
   "сделать миллионером": { emoji: "💸", customEmojiId: "", actionText: "сделал миллионером" },
   "обанкротить": { emoji: "📉", customEmojiId: "", actionText: "обанкротил" },
-  "отправить в космос": { emoji: "🚀", customEmojiId: "", actionText: "отправил в космос" },
+  "отправить в космос": { emoji: PREMIUM_EMOJI_FALLBACK.rocket, customEmojiId: PREMIUM_EMOJI.rocket, actionText: "отправил в космос" },
   "отправить в minecraft": { emoji: "⛏️", customEmojiId: "", actionText: "отправил в Minecraft" },
   "отправить в roblox": { emoji: "🎮", customEmojiId: "", actionText: "отправил в Roblox" },
   "отправить на работу": { emoji: "💼", customEmojiId: "", actionText: "отправил на работу" },
@@ -1027,8 +1045,11 @@ async function sendRpActionMessage(msg, commandData) {
   const targetName = getTelegramName(msg.reply_to_message.from);
   const emoji = commandData.emoji || "🎲";
   const text = `${emoji} | ${userName} ${commandData.actionText} ${targetName}`;
+  const customEmojiId = commandData.customEmojiId || "";
 
-  if (commandData.customEmojiId) {
+  console.log("Premium emoji:", customEmojiId);
+
+  if (customEmojiId) {
     try {
       await originalSendMessage(msg.chat.id, text, {
         entities: [
@@ -1036,7 +1057,7 @@ async function sendRpActionMessage(msg, commandData) {
             type: "custom_emoji",
             offset: 0,
             length: emoji.length,
-            custom_emoji_id: commandData.customEmojiId
+            custom_emoji_id: customEmojiId
           }
         ],
         reply_to_message_id: msg.message_id
@@ -1121,7 +1142,7 @@ const groupCommands = [
   { command: "unban", description: "✅ разбан" },
   { command: "pin", description: "📌 закрепить сообщение" },
   { command: "unpin", description: "📍 открепить сообщение" },
-  { command: "emojiid", description: "💎 ID Premium Emoji" },
+  { command: "emojiid", description: "💎 получить ID premium emoji" },
   { command: "settitle", description: "✏️ изменить название чата" },
   { command: "setdescription", description: "📝 описание чата" },
   { command: "invite", description: "🔗 ссылка на чат" },
@@ -2772,67 +2793,45 @@ bot.onText(/^\/logs(?:@\w+)?(?:\s|$)/i, async (msg) => {
   bot.sendMessage(msg.chat.id, getAdminLogsText(msg.chat.id));
 });
 
-bot.onText(/^\/emojiid(?:@\w+)?(?:\s+(.+))?$/i, (msg, match) => {
+bot.onText(/^\/emojiid(?:@\w+)?(?:\s|$)/i, (msg) => {
   registerUserInChat(msg);
-  if (!ensureCommandEnabled(msg, "emojiid")) return;
 
-  if (!msg.reply_to_message) {
+  const sourceMessage = msg.reply_to_message || msg;
+  const customEmojis = getCustomEmojiIdsFromMessage(sourceMessage);
+
+  if (customEmojis.length === 0) {
     bot.sendMessage(
       msg.chat.id,
-      "💎 Ответь командой /emojiid на сообщение с Premium Emoji."
+      [
+        "💎 <b>Premium Emoji ID не найден</b>",
+        "",
+        "1️⃣ Отправь Premium Emoji в чат.",
+        "2️⃣ Ответь на него командой <b>/emojiid</b>.",
+        "3️⃣ Я покажу <code>custom_emoji_id</code>."
+      ].join("\n"),
+      {
+        parse_mode: "HTML",
+        reply_to_message_id: msg.message_id
+      }
     );
     return;
   }
 
-  const customEmojiEntities = extractCustomEmojiEntities(msg.reply_to_message);
-
-  if (customEmojiEntities.length === 0) {
-    bot.sendMessage(
-      msg.chat.id,
-      "💎 В ответном сообщении не найдено Premium Emoji."
-    );
-    return;
-  }
-
-  const commandName = (match[1] || "").trim().toLowerCase();
-
-  if (commandName) {
-    if (!RP_COMMANDS[commandName]) {
-      bot.sendMessage(
-        msg.chat.id,
-        `💎 RP-команда "${commandName}" не найдена. Используй точное название команды, например: /emojiid обнять`
-      );
-      return;
-    }
-
-    const firstPremiumEmoji = customEmojiEntities[0];
-    rememberRpCommandPremiumEmojiId(commandName, firstPremiumEmoji.customEmojiId);
-    savePremiumEmojiIds();
-  } else {
-    rememberPremiumEmojiIdsFromMessage(msg.reply_to_message);
-    syncRpCommandEmojiIds();
-  }
-
-  const text = customEmojiEntities
-    .map((entity) => {
-      const rpCommands = getRpCommandNamesByEmoji(entity.emoji);
-      const rpText = rpCommands.length > 0
-        ? `RP: ${rpCommands.join(", ")}`
-        : "RP: нет команд с таким emoji";
-      const commandText = commandName
-        ? `Команда: ${commandName}`
-        : rpText;
-
-      return [
-        "💎 Premium Emoji",
-        `Emoji: ${entity.emoji}`,
-        `ID: ${entity.customEmojiId}`,
-        commandText
-      ].join("\n");
+  const text = customEmojis
+    .map((item, index) => {
+      console.log("Premium emoji:", item.customEmojiId);
+      return `${index + 1}. ${item.emoji}\n<code>${item.customEmojiId}</code>`;
     })
     .join("\n\n");
 
-  bot.sendMessage(msg.chat.id, text, { reply_to_message_id: msg.message_id });
+  bot.sendMessage(
+    msg.chat.id,
+    "💎 <b>Найденные Premium Emoji ID:</b>\n\n" + text,
+    {
+      parse_mode: "HTML",
+      reply_to_message_id: msg.message_id
+    }
+  );
 });
 
 bot.onText(/^\/id(?:@\w+)?(?:\s+(.+))?$/i, (msg) => {
