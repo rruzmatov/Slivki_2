@@ -5,6 +5,7 @@
   "main": "src/bot.js",
   "scripts": {
     "start": "node src/bot.js",
+    "start:iris": "node src/iris-bot.js",
     "build": "tsc --noEmit"
   },
   "dependencies": {

@@ -3,6 +3,7 @@ require("dotenv").config();
 const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 const path = require("path");
+const familySystem = require("./family-system");
 
 const botToken = process.env.BOT_TOKEN;
 const ownerIds = (process.env.OWNER_IDS || "")
@@ -18,6 +19,68 @@ if (!botToken) {
 }
 
 const bot = new TelegramBot(botToken, { polling: true });
+
+const UNKNOWN_COMMAND_TEXT = "❓ Такой команды нет. Напиши /commands, чтобы увидеть список всех команд.";
+const HANDLER_ERROR_TEXT = "⚠️ Что-то пошло не так. Попробуй ещё раз чуть позже.";
+const registeredOnTextRegexes = [];
+const manualSlashCommandRegexes = [
+  /^(?:сливки\s+брак|брак|\/brak)(?:\s+(.+))?$/i,
+  /^(?:сливки\s+развод|развод|\/razvod)$/i
+];
+const originalOnText = bot.onText.bind(bot);
+
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled Rejection:", getErrorMessage(reason));
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception:", getErrorMessage(error));
+});
+
+bot.on("polling_error", (error) => {
+  console.error("Polling error:", getErrorMessage(error));
+});
+
+function regexMatches(regexp, text) {
+  regexp.lastIndex = 0;
+  return regexp.test(text);
+}
+
+function isKnownSlashCommand(text, msg = null) {
+  const value = String(text || "").trim();
+
+  if (!value.startsWith("/")) return false;
+
+  return registeredOnTextRegexes.some((regexp) => regexMatches(regexp, value)) ||
+    (!msg || !isPrivateChat(msg)) && manualSlashCommandRegexes.some((regexp) => regexMatches(regexp, value));
+}
+
+async function replyHandlerError(msg) {
+  if (!msg?.chat?.id) return;
+
+  await bot.sendMessage(
+    msg.chat.id,
+    HANDLER_ERROR_TEXT,
+    { reply_to_message_id: msg.message_id }
+  ).catch(() => {});
+}
+
+// Единая защита всех bot.onText-хендлеров от тихих падений.
+bot.onText = (regexp, callback) => {
+  registeredOnTextRegexes.push(regexp);
+
+  return originalOnText(regexp, async (...args) => {
+    const msg = args[0];
+
+    try {
+      return await callback(...args);
+    } catch (error) {
+      console.error(`Ошибка в обработчике ${regexp}:`, getErrorMessage(error));
+      await replyHandlerError(msg);
+      return null;
+    }
+  });
+};
 
 const PREMIUM_EMOJI_FILE = path.join(__dirname, "premium-emojis.json");
 const savedPremiumEmojiIds = loadPremiumEmojiIds();
@@ -593,10 +656,6 @@ bot.on("message", (msg) => {
   rememberPremiumEmojiIdsFromMessage(msg);
 });
 
-bot.on("polling_error", (error) => {
-  console.error("Polling error:", getErrorMessage(error));
-});
-
 bot.on("webhook_error", (error) => {
   console.error("Webhook error:", getErrorMessage(error));
 });
@@ -1140,6 +1199,37 @@ function setMarriage(chatId, firstUserId, secondUserId) {
   saveMarriages();
 }
 
+function getAllMarriages(chatId) {
+  const chatMarriages = getChatMarriages(chatId);
+  const seenPairs = new Set();
+
+  // В JSON каждый брак хранится в две стороны, поэтому для списка убираем дубликаты.
+  return Object.entries(chatMarriages)
+    .map(([firstUserId, secondUserId]) => [Number(firstUserId), Number(secondUserId)])
+    .filter(([firstUserId, secondUserId]) => Number.isFinite(firstUserId) && Number.isFinite(secondUserId))
+    .filter(([firstUserId, secondUserId]) => {
+      const pairKey = [firstUserId, secondUserId].sort((a, b) => a - b).join(":");
+
+      if (seenPairs.has(pairKey)) {
+        return false;
+      }
+
+      seenPairs.add(pairKey);
+      return true;
+    })
+    .map(([firstUserId, secondUserId]) => {
+      const firstUser = users.get(firstUserId);
+      const secondUser = users.get(secondUserId);
+
+      return {
+        user1_id: firstUserId,
+        user1_name: firstUser ? getUserDisplayName(firstUser) : `ID:${firstUserId}`,
+        user2_id: secondUserId,
+        user2_name: secondUser ? getUserDisplayName(secondUser) : `ID:${secondUserId}`
+      };
+    });
+}
+
 function removeMarriage(chatId, userId) {
   const chatMarriages = getChatMarriages(chatId);
   const partnerId = chatMarriages[userId];
@@ -1390,6 +1480,7 @@ const DEFAULT_COMMAND_SETTINGS = [
   ["brak", true],
   ["razvod", true],
   ["partner", true],
+  ["career", true],
   ["action", true]
 ];
 
@@ -1855,7 +1946,7 @@ function getAllAdminLogsText() {
   return "📋 Последние админ-действия во всех группах:\n\n" + formatAdminLogs(logs, { showChat: true });
 }
 
-bot.onText(/^\/stats(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/stats(?:@\w+)?|стата)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "stats")) return;
 
@@ -2595,10 +2686,17 @@ const COMMANDS_PAGES = [
       { setting: "joinleave", sticker: "🚪", command: "+выходы / -выходы", description: "уведомления о выходах" },
       { setting: "joinleave", sticker: "🔔", command: "+входы-выходы", description: "включить оба уведомления" },
       { setting: "brak", sticker: "💍", command: "/brak или брак", description: "игровой брак" },
+      { setting: "brak", sticker: "💒", command: "браки", description: "список браков в чате" },
+      { setting: "brak", sticker: "🏡", command: "семья", description: "карточка игровой семьи" },
+      { setting: "brak", sticker: "💞", command: "любовь", description: "ежедневная любовь партнёру" },
+      { setting: "career", sticker: "💼", command: "работать", description: "заработать монеты для семьи" },
+      { setting: "career", sticker: "📋", command: "профессии", description: "список карьер" },
+      { setting: "career", sticker: "🔁", command: "сменить профессию", description: "выбрать карьеру" },
       { setting: "razvod", sticker: "💔", command: "/razvod или развод", description: "игровой развод" },
       { setting: "partner", sticker: "💞", command: "/partner", description: "показать вторую половинку" },
       { setting: "action", sticker: "🎭", command: "ударить / обнять / убить", description: "ролевые действия ответом" },
-      { sticker: "🎲", command: "сливки шанс", description: "рандомная вероятность" }
+      { sticker: "🎲", command: "сливки шанс", description: "рандомная вероятность" },
+      { sticker: "🏆", command: "сливки кто лучший", description: "выбрать случайного участника" }
     ]
   }
 ];
@@ -2732,6 +2830,25 @@ function parseProbabilityQuestion(text) {
   if (!question) return null;
 
   return question;
+}
+
+function isBestUserQuestion(text) {
+  const cleanText = text.trim();
+  return /^(?:сливки\s+)?кто\s+(?:(?:сам(?:ый|ая)\s+)?лучш(?:ий|ая|ее)|лучше\s+всех)(?:\s+(?:в\s+чате|тут|здесь|сегодня))?[?!]*$/i.test(cleanText);
+}
+
+function getRandomChatUser(chatId, excludeUserId = null) {
+  const knownUserIds = chatUsers.has(chatId)
+    ? Array.from(chatUsers.get(chatId))
+    : (chatInfo.get(chatId)?.users || []);
+
+  const candidates = knownUserIds
+    .map((userId) => users.get(Number(userId)))
+    .filter((user) => user && !user.isBot && user.id !== excludeUserId);
+
+  if (candidates.length === 0) return null;
+
+  return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
 function getMarriagePercent() {
@@ -2877,6 +2994,7 @@ bot.on("callback_query", async (query) => {
     }
 
     setMarriage(proposal.chatId, proposal.firstUserId, proposal.secondUserId);
+    familySystem.createFamilyForMarriage(proposal.chatId, proposal.firstUserId, proposal.secondUserId);
     pendingMarriages.delete(proposalId);
 
     await bot.editMessageText(
@@ -3097,7 +3215,7 @@ bot.onText(/^\/commands(?:@\w+)?(?:\s|$)/i, (msg) => {
   });
 });
 
-bot.onText(/^\/profile(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/profile(?:@\w+)?|профиль)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "profile")) return;
 
@@ -3141,7 +3259,7 @@ bot.onText(/^\/profile(?:@\w+)?(?:\s|$)/i, async (msg) => {
 });
 
 // /top command handler
-bot.onText(/^\/top(?:@\w+)?(?:\s|$)/i, (msg) => {
+bot.onText(/^(?:\/top(?:@\w+)?|топ)(?:\s|$)/i, (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "top")) return;
 
@@ -3177,7 +3295,7 @@ bot.onText(/^\/top(?:@\w+)?(?:\s|$)/i, (msg) => {
 });
 
 
-bot.onText(/^\/logs(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/logs(?:@\w+)?|логи)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "logs")) return;
 
@@ -3240,7 +3358,7 @@ bot.onText(/^\/emojiid(?:@\w+)?(?:\s|$)/i, (msg) => {
   );
 });
 
-bot.onText(/^\/id(?:@\w+)?(?:\s+(.+))?$/i, (msg) => {
+bot.onText(/^(?:\/id(?:@\w+)?|айди)(?:\s+(.+))?$/i, (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "id")) return;
 
@@ -3303,7 +3421,7 @@ bot.onText(/^\/chatinfo(?:@\w+)?$/i, async (msg) => {
   );
 });
 
-bot.onText(/^\/rules(?:@\w+)?$/i, (msg) => {
+bot.onText(/^(?:\/rules(?:@\w+)?|правила)$/i, (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "rules")) return;
 
@@ -3604,7 +3722,7 @@ bot.onText(/^\/(partner|партнер)(?:@\w+)?(?:\s|$)/i, (msg) => {
 });
 
 // /lock and /unlock handlers
-bot.onText(/^\/lock(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/lock(?:@\w+)?|закрыть)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "lock")) return;
 
@@ -3642,7 +3760,7 @@ bot.onText(/^\/lock(?:@\w+)?(?:\s|$)/i, async (msg) => {
 });
 
 
-bot.onText(/^\/unlock(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/unlock(?:@\w+)?|открыть)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "unlock")) return;
 
@@ -3684,7 +3802,10 @@ bot.onText(/^([+-])\s*(?:чат|chat)$/i, async (msg, match) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "chat")) return;
 
-  if (isPrivateChat(msg)) return;
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "💬 Команда +чат / -чат работает в группе.");
+    return;
+  }
 
   const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
@@ -3726,7 +3847,10 @@ bot.onText(/^([+-])\s*(?:топик|topic)$/i, async (msg, match) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "topic")) return;
 
-  if (isPrivateChat(msg)) return;
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "🧵 Команда +топик / -топик работает в группе.");
+    return;
+  }
 
   const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
 
@@ -3771,7 +3895,7 @@ bot.onText(/^([+-])\s*(?:топик|topic)$/i, async (msg, match) => {
   }
 });
 
-bot.onText(/^\/admins(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/admins(?:@\w+)?|админы)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "admins")) return;
 
@@ -3809,7 +3933,7 @@ bot.onText(/^\/admins(?:@\w+)?(?:\s|$)/i, async (msg) => {
 });
 
 // /slowmode command handler
-bot.onText(/^\/slowmode(?:@\w+)?(?:\s+(.+))?$/i, async (msg, match) => {
+bot.onText(/^(?:\/slowmode(?:@\w+)?|слоумод)(?:\s+(.+))?$/i, async (msg, match) => {
   registerUserInChat(msg);
 
   if (!ensureCommandEnabled(msg, "slowmode")) return;
@@ -4028,7 +4152,10 @@ bot.onText(/^([+-])\s*(входы|выходы|входы-выходы)(?:\s+(\d
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "joinleave")) return;
 
-  if (isPrivateChat(msg)) return;
+  if (isPrivateChat(msg)) {
+    bot.sendMessage(msg.chat.id, "👋 Настройка входов и выходов работает в группе.");
+    return;
+  }
 
   const isAdmin = await canUseAdminCommands(msg.chat.id, msg.from.id);
   if (!isAdmin) {
@@ -4206,7 +4333,7 @@ bot.on("my_chat_member", (update) => {
   }
 });
 
-bot.onText(/^\/warn(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/warn(?:@\w+)?|варн)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "warn")) return;
 
@@ -4268,7 +4395,7 @@ bot.onText(/^\/warn(?:@\w+)?(?:\s|$)/i, async (msg) => {
   );
 });
 
-bot.onText(/^\/unwarn(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/unwarn(?:@\w+)?|анварн)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "unwarn")) return;
 
@@ -4305,7 +4432,7 @@ bot.onText(/^\/unwarn(?:@\w+)?(?:\s|$)/i, async (msg) => {
   );
 });
 
-bot.onText(/^\/mute(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "mute")) return;
 
@@ -4400,7 +4527,7 @@ bot.onText(/^\/mute(?:@\w+)?(?:\s|$)/i, async (msg) => {
   }
 });
 
-bot.onText(/^\/unmute(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/unmute(?:@\w+)?|размут)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "unmute")) return;
 
@@ -4449,7 +4576,7 @@ bot.onText(/^\/unmute(?:@\w+)?(?:\s|$)/i, async (msg) => {
   }
 });
 
-bot.onText(/^\/(kick|cick)(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/(?:kick|cick)(?:@\w+)?|кик)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "kick")) return;
 
@@ -4507,7 +4634,7 @@ bot.onText(/^\/(kick|cick)(?:@\w+)?(?:\s|$)/i, async (msg) => {
   }
 });
 
-bot.onText(/^\/ban(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/ban(?:@\w+)?|бан)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "ban")) return;
 
@@ -4553,7 +4680,7 @@ bot.onText(/^\/ban(?:@\w+)?(?:\s|$)/i, async (msg) => {
   }
 });
 
-bot.onText(/^\/unban(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^(?:\/unban(?:@\w+)?|разбан)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "unban")) return;
 
@@ -4816,6 +4943,256 @@ bot.on("message", async (msg) => {
     return;
   }
 
+  if (/^браки$/i.test(msg.text.trim())) {
+    if (!ensureCommandEnabled(msg, "brak")) return;
+
+    const list = getAllMarriages(msg.chat.id);
+
+    if (!list.length) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💔 В этом чате пока никто не женат.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const text = list
+      .map((marriage, index) => `${index + 1}. ${marriage.user1_name} 💍 ${marriage.user2_name}`)
+      .join("\n");
+
+    bot.sendMessage(
+      msg.chat.id,
+      `💒 Браки в этом чате:\n\n${text}`,
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
+  if (/^любовь$/i.test(msg.text.trim())) {
+    if (!ensureCommandEnabled(msg, "brak")) return;
+
+    if (!msg.reply_to_message?.from) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💞 Ответь на сообщение своей второй половинки и напиши: любовь",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const partnerId = getMarriagePartnerId(msg.chat.id, msg.from.id);
+
+    if (!partnerId) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💔 У тебя пока нет игровой семьи. Сначала заключи брак.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    if (Number(msg.reply_to_message.from.id) !== Number(partnerId)) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💞 Любовь можно отправить только своей второй половинке.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const result = familySystem.addLove(msg.chat.id, msg.from.id, partnerId);
+
+    if (!result.ok && result.reason === "cooldown") {
+      bot.sendMessage(
+        msg.chat.id,
+        `⏳ Семейную любовь уже начисляли недавно.\n\nПопробуйте снова через ${familySystem.formatRemainingTime(result.remainingMs)}.`,
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    bot.sendMessage(
+      msg.chat.id,
+      [
+        "💞 Любовь принята!",
+        "",
+        `❤️ +${result.loveGain} любви`,
+        `⭐ +${result.xpGain} опыта семьи`,
+        `🏡 Уровень семьи: ${result.family.level}`,
+        result.leveledUp ? "🎉 Семья получила новый уровень!" : ""
+      ].filter(Boolean).join("\n"),
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
+  if (/^семья$/i.test(msg.text.trim())) {
+    if (!ensureCommandEnabled(msg, "brak")) return;
+
+    const partnerId = getMarriagePartnerId(msg.chat.id, msg.from.id);
+
+    if (!partnerId) {
+      bot.sendMessage(
+        msg.chat.id,
+        "💔 У тебя пока нет игровой семьи. Напиши брак ответом на сообщение участника.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const family = familySystem.ensureFamilyForMarriage(msg.chat.id, msg.from.id, partnerId);
+    const partner = users.get(partnerId);
+    const firstName = getUserDisplayName(getUser(msg.from));
+    const partnerName = partner ? getUserDisplayName(partner) : `ID:${partnerId}`;
+    const firstCareer = familySystem.getCareer(msg.from.id);
+    const partnerCareer = familySystem.getCareer(partnerId);
+    const xpToNextLevel = familySystem.getXpToNextLevel(family.level);
+
+    bot.sendMessage(
+      msg.chat.id,
+      [
+        "🏡 Семья",
+        "",
+        `💍 Пара: ${firstName} 💞 ${partnerName}`,
+        `🏆 Уровень: ${family.level}`,
+        `⭐ Опыт: ${family.xp}/${xpToNextLevel}`,
+        `❤️ Любовь: ${family.love}`,
+        `💰 Баланс: ${family.balance}`,
+        "",
+        "💼 Карьера:",
+        `• ${firstName}: ${familySystem.getProfessionName(firstCareer.profession)} ур. ${firstCareer.level}`,
+        `• ${partnerName}: ${familySystem.getProfessionName(partnerCareer.profession)} ур. ${partnerCareer.level}`
+      ].join("\n"),
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
+  if (/^работать$/i.test(msg.text.trim())) {
+    registerUserInChat(msg);
+    if (!ensureCommandEnabled(msg, "career")) return;
+
+    if (isPrivateChat(msg)) {
+      bot.sendMessage(msg.chat.id, "💼 Карьера работает в группе, где есть игровая семья.");
+      return;
+    }
+
+    const partnerId = getMarriagePartnerId(msg.chat.id, msg.from.id);
+    const result = familySystem.doWork(msg.from.id, {
+      chatId: msg.chat.id,
+      partnerId
+    });
+
+    if (!result.ok && result.reason === "no_marriage") {
+      bot.sendMessage(
+        msg.chat.id,
+        "💔 Чтобы работать и пополнять семейный баланс, сначала заключи игровой брак.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    if (!result.ok && result.reason === "unemployed") {
+      bot.sendMessage(
+        msg.chat.id,
+        "💼 У тебя пока нет профессии.\n\nНапиши: профессии\nЗатем выбери: сменить профессию курьер",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    if (!result.ok && result.reason === "cooldown") {
+      bot.sendMessage(
+        msg.chat.id,
+        `⏳ Ты уже работал(а) недавно.\n\nСледующая смена через ${familySystem.formatRemainingTime(result.remainingMs)}.`,
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    const xpLeft = Math.max(0, result.xpToNextLevel - result.career.xp);
+
+    bot.sendMessage(
+      msg.chat.id,
+      [
+        `💼 Ты поработал(а): ${result.professionName.toLowerCase()} и заработал(а) ${result.earned} монет для семьи!`,
+        `⭐ +${result.xpGain} опыта карьеры (Уровень ${result.career.level}, до след. уровня: ${xpLeft} XP)`,
+        result.leveledUp ? "🎉 Карьерный уровень повышен!" : ""
+      ].filter(Boolean).join("\n"),
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
+  if (/^профессии$/i.test(msg.text.trim())) {
+    registerUserInChat(msg);
+    if (!ensureCommandEnabled(msg, "career")) return;
+
+    const career = familySystem.getCareer(msg.from.id);
+    const professions = familySystem.getAvailableProfessions(msg.from.id);
+    const lines = professions.map((profession) => {
+      const lock = profession.unlocked ? "🔓" : "🔒";
+      const current = profession.current ? " — выбрана" : "";
+      const itemText = profession.requiresItem
+        ? `, нужен предмет: ${familySystem.getRequiredItemName(profession.requiresItem)}`
+        : "";
+
+      return `${lock} ${profession.name} (${profession.key}) — с ур. ${profession.requiredLevel}${itemText}${current}`;
+    });
+
+    bot.sendMessage(
+      msg.chat.id,
+      [
+        "💼 Профессии",
+        "",
+        `👤 Текущая: ${familySystem.getProfessionName(career.profession)} ур. ${career.level}`,
+        `⭐ Опыт: ${career.xp}/${familySystem.getXpToNextCareerLevel(career.level)}`,
+        "",
+        lines.join("\n"),
+        "",
+        "🔁 Смена: сменить профессию курьер"
+      ].join("\n"),
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
+  const switchProfessionMatch = msg.text.trim().match(/^сменить\s+профессию\s+(.+)$/i);
+
+  if (switchProfessionMatch) {
+    registerUserInChat(msg);
+    if (!ensureCommandEnabled(msg, "career")) return;
+
+    const professionText = switchProfessionMatch[1].trim();
+    const result = familySystem.switchProfession(msg.from.id, professionText);
+
+    if (!result.ok && result.reason === "unknown_profession") {
+      bot.sendMessage(
+        msg.chat.id,
+        "⚠️ Профессия не найдена.\n\nНапиши: профессии",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    if (!result.ok && result.reason === "level_required") {
+      bot.sendMessage(
+        msg.chat.id,
+        `🔒 ${result.professionName} пока недоступен.\n\nНужен карьерный уровень: ${result.requiredLevel}\nТвой уровень: ${result.career.level}`,
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    bot.sendMessage(
+      msg.chat.id,
+      `✅ Профессия изменена: ${result.professionName}.\n\nТеперь можно написать: работать`,
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
   const commandText = (msg.text || "").trim().toLowerCase();
   const commandData = RP_COMMANDS[commandText];
 
@@ -4877,6 +5254,26 @@ bot.on("message", async (msg) => {
     bot.sendMessage(
       msg.chat.id,
       `🎲 Вероятность того, что ${probabilityQuestion}: ${percent}%`,
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
+  if (isBestUserQuestion(msg.text)) {
+    const bestUser = getRandomChatUser(msg.chat.id, botId);
+
+    if (!bestUser) {
+      bot.sendMessage(
+        msg.chat.id,
+        "🏆 Пока не из кого выбрать лучшего. Пусть участники напишут пару сообщений в группе.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    bot.sendMessage(
+      msg.chat.id,
+      `🏆 Лучший сегодня: ${getUserDisplayName(bestUser)}`,
       { reply_to_message_id: msg.message_id }
     );
     return;
@@ -5045,4 +5442,17 @@ bot.on("message", async (msg) => {
     msg.chat.id,
     "✅ Ваше сообщение отправлено в поддержку."
   );
+});
+
+bot.on("message", (msg) => {
+  if (!msg.text || !msg.text.trim().startsWith("/")) return;
+  if (isKnownSlashCommand(msg.text, msg)) return;
+
+  bot.sendMessage(
+    msg.chat.id,
+    UNKNOWN_COMMAND_TEXT,
+    { reply_to_message_id: msg.message_id }
+  ).catch((error) => {
+    console.error("Unknown command fallback error:", getErrorMessage(error));
+  });
 });
