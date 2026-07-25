@@ -5456,3 +5456,4 @@ bot.on("message", (msg) => {
     console.error("Unknown command fallback error:", getErrorMessage(error));
   });
 });
+// lalalalalalala musor, eto nado udalit
