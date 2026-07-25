@@ -4,13 +4,21 @@
   "description": "Telegram AI Bot",
   "main": "src/bot.js",
   "scripts": {
-    "start": "node src/bot.js"
+    "start": "node src/bot.js",
+    "build": "tsc --noEmit"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
     "dotenv": "^17.4.2",
+    "nanoid": "^6.0.0",
     "node-telegram-bot-api": "^0.67.0",
     "openai": "^6.39.1",
-    "sqlite3": "^6.0.1"
+    "sqlite3": "^6.0.1",
+    "telegraf": "^4.16.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
   }
 }

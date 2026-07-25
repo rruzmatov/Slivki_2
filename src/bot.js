@@ -617,6 +617,9 @@ const waitingRulesInput = new Set();
 const autoKickSettings = new Map();
 const userLeftHistory = new Map();
 const joinLeaveSettings = new Map();
+const slowModeSettings = new Map();
+const slowModeLastMessages = new Map();
+const ignoredSlowModeMessages = new Set();
 
 const STATS_FILE = path.join(__dirname, "stats.json");
 const CHATS_FILE = path.join(__dirname, "chats.json");
@@ -665,6 +668,18 @@ for (const [chatId, settings] of savedChatSettings.autoKickSettings) {
 for (const [chatId, settings] of savedChatSettings.joinLeaveSettings) {
   joinLeaveSettings.set(chatId, settings);
 }
+
+for (const [chatId, settings] of savedChatSettings.slowModeSettings) {
+  slowModeSettings.set(chatId, settings);
+}
+
+bot.on("message", async (msg) => {
+  try {
+    await enforceSlowMode(msg);
+  } catch (error) {
+    console.error("Slowmode enforcement error:", getErrorMessage(error));
+  }
+});
 
 console.log("Users file:", USERS_FILE);
 console.log("Saved users loaded:", users.size);
@@ -745,13 +760,27 @@ function normalizeAutoKickSetting(setting) {
   };
 }
 
+function normalizeSlowModeSetting(setting) {
+  const seconds = Number(setting?.seconds);
+
+  if (!Number.isInteger(seconds) || seconds < 1) {
+    return null;
+  }
+
+  return {
+    seconds,
+    updatedAt: typeof setting.updatedAt === "string" ? setting.updatedAt : new Date().toISOString()
+  };
+}
+
 function loadChatSettings() {
   try {
     if (!fs.existsSync(CHAT_SETTINGS_FILE)) {
       return {
         rules: new Map(),
         autoKickSettings: new Map(),
-        joinLeaveSettings: new Map()
+        joinLeaveSettings: new Map(),
+        slowModeSettings: new Map()
       };
     }
 
@@ -759,6 +788,7 @@ function loadChatSettings() {
     const rules = new Map();
     const loadedAutoKickSettings = new Map();
     const loadedJoinLeaveSettings = new Map();
+    const loadedSlowModeSettings = new Map();
 
     if (data?.rules && typeof data.rules === "object" && !Array.isArray(data.rules)) {
       for (const [chatId, text] of Object.entries(data.rules)) {
@@ -791,17 +821,30 @@ function loadChatSettings() {
       }
     }
 
+    if (data?.slowModeSettings && typeof data.slowModeSettings === "object" && !Array.isArray(data.slowModeSettings)) {
+      for (const [chatId, setting] of Object.entries(data.slowModeSettings)) {
+        const numericChatId = Number(chatId);
+        const normalized = normalizeSlowModeSetting(setting);
+
+        if (Number.isFinite(numericChatId) && normalized) {
+          loadedSlowModeSettings.set(numericChatId, normalized);
+        }
+      }
+    }
+
     return {
       rules,
       autoKickSettings: loadedAutoKickSettings,
-      joinLeaveSettings: loadedJoinLeaveSettings
+      joinLeaveSettings: loadedJoinLeaveSettings,
+      slowModeSettings: loadedSlowModeSettings
     };
   } catch (error) {
     console.error("Load chat settings error:", getErrorMessage(error));
     return {
       rules: new Map(),
       autoKickSettings: new Map(),
-      joinLeaveSettings: new Map()
+      joinLeaveSettings: new Map(),
+      slowModeSettings: new Map()
     };
   }
 }
@@ -812,7 +855,8 @@ function saveChatSettings() {
     {
       rules: Object.fromEntries(chatRules),
       autoKickSettings: Object.fromEntries(autoKickSettings),
-      joinLeaveSettings: Object.fromEntries(joinLeaveSettings)
+      joinLeaveSettings: Object.fromEntries(joinLeaveSettings),
+      slowModeSettings: Object.fromEntries(slowModeSettings)
     },
     "Save chat settings"
   );
@@ -1520,6 +1564,133 @@ function getJoinLeaveSettings(chatId) {
   }
 
   return joinLeaveSettings.get(chatId);
+}
+
+function parseSlowModeDuration(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  if (normalized === "0") {
+    return 0;
+  }
+
+  const match = normalized.match(/^(\d+)(s|m)$/);
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+  if (!Number.isSafeInteger(amount) || amount < 1) {
+    return null;
+  }
+
+  const multiplier = match[2] === "m" ? 60 : 1;
+  const seconds = amount * multiplier;
+
+  if (seconds > 3600) {
+    return null;
+  }
+
+  return seconds;
+}
+
+function formatSlowModeDuration(seconds) {
+  if (seconds <= 0) return "0";
+  if (seconds % 60 === 0) return `${seconds / 60}m`;
+  return `${seconds}s`;
+}
+
+function getSlowModeSetting(chatId) {
+  return slowModeSettings.get(chatId) || null;
+}
+
+function setSlowModeSetting(chatId, seconds) {
+  if (seconds <= 0) {
+    slowModeSettings.delete(chatId);
+    slowModeLastMessages.delete(chatId);
+    saveChatSettings();
+    return;
+  }
+
+  slowModeSettings.set(chatId, {
+    seconds,
+    updatedAt: new Date().toISOString()
+  });
+  saveChatSettings();
+}
+
+function getSlowModeUserKey(chatId, userId) {
+  return `${chatId}:${userId}`;
+}
+
+function getSlowModeMessageKey(msg) {
+  return `${msg.chat.id}:${msg.message_id}`;
+}
+
+function markSlowModeIgnored(msg) {
+  const key = getSlowModeMessageKey(msg);
+  ignoredSlowModeMessages.add(key);
+
+  if (ignoredSlowModeMessages.size > 1000) {
+    const firstKey = ignoredSlowModeMessages.values().next().value;
+    ignoredSlowModeMessages.delete(firstKey);
+  }
+}
+
+function isSlowModeIgnored(msg) {
+  return ignoredSlowModeMessages.has(getSlowModeMessageKey(msg));
+}
+
+async function deleteMessageSafe(chatId, messageId, context = "deleteMessage") {
+  try {
+    await bot.deleteMessage(chatId, messageId);
+    return true;
+  } catch (error) {
+    console.error(`${context} error:`, getErrorMessage(error));
+    return false;
+  }
+}
+
+async function shouldBypassSlowMode(msg) {
+  if (!msg.from || msg.from.is_bot) return true;
+  return canUseAdminCommands(msg.chat.id, msg.from.id);
+}
+
+async function enforceSlowMode(msg) {
+  if (!msg.chat || !msg.from || isPrivateChat(msg)) return false;
+  if (msg.new_chat_members || msg.left_chat_member) return false;
+
+  const setting = getSlowModeSetting(msg.chat.id);
+  if (!setting || setting.seconds <= 0) return false;
+
+  if (await shouldBypassSlowMode(msg)) return false;
+
+  const now = Date.now();
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+
+  if (!slowModeLastMessages.has(chatId)) {
+    slowModeLastMessages.set(chatId, new Map());
+  }
+
+  const chatLastMessages = slowModeLastMessages.get(chatId);
+  const lastMessageAt = chatLastMessages.get(userId) || 0;
+  const elapsedSeconds = Math.floor((now - lastMessageAt) / 1000);
+
+  if (lastMessageAt > 0 && elapsedSeconds < setting.seconds) {
+    const remainingSeconds = setting.seconds - elapsedSeconds;
+    markSlowModeIgnored(msg);
+    await deleteMessageSafe(msg.chat.id, msg.message_id, "slowmodeDeleteMessage");
+    await sendMessageSafe(
+      msg.chat.id,
+      `⏳ Подождите ещё ${remainingSeconds} секунд.`,
+      { reply_to_message_id: msg.message_id },
+      "slowmodeNotice"
+    );
+    return true;
+  }
+
+  chatLastMessages.set(userId, now);
+  return false;
 }
 
 function getStatusLabel(status) {

@@ -6,6 +6,12 @@
       "joins": true,
       "leaves": true,
       "leaveMinMessages": 0
+    },
+    "-1004449760930": {
+      "joins": true,
+      "leaves": true,
+      "leaveMinMessages": 0
     }
-  }
+  },
+  "slowModeSettings": {}
 }
