@@ -18,6 +18,22 @@ if (!botToken) {
   process.exit(1);
 }
 
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION:", err);
+});
+
+process.on("SIGTERM", () => {
+  console.log("Получен SIGTERM от Railway");
+});
+
+process.on("SIGINT", () => {
+  console.log("Получен SIGINT");
+});
+
 const bot = new TelegramBot(botToken, { polling: true });
 
 const UNKNOWN_COMMAND_TEXT = "❓ Такой команды нет. Напиши /commands, чтобы увидеть список всех команд.";
@@ -62,7 +78,7 @@ async function replyHandlerError(msg) {
     msg.chat.id,
     HANDLER_ERROR_TEXT,
     { reply_to_message_id: msg.message_id }
-  ).catch(() => {});
+  ).catch(() => { });
 }
 
 // Единая защита всех bot.onText-хендлеров от тихих падений.
