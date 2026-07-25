@@ -681,6 +681,50 @@ bot.on("message", async (msg) => {
   }
 });
 
+// --- Command Normalization Layer ---
+const RUSSIAN_COMMAND_ALIASES = {
+  "мут": "mute",
+  "размут": "unmute",
+  "бан": "ban",
+  "разбан": "unban",
+  "кик": "kick",
+  "варн": "warn",
+  "пред": "warn",
+  "анварн": "unwarn",
+  "снятьварн": "unwarn",
+  "логи": "logs",
+  "стата": "stats",
+  "статистика": "stats",
+  "правила": "rules",
+  "профиль": "profile",
+  "топ": "top",
+  "админы": "admins",
+  "меню": "menu",
+  "команды": "commands",
+  "айди": "id",
+  "чат": "chat",
+  "закрыть": "lock",
+  "открыть": "unlock",
+  "медленный": "slowmode"
+};
+
+// This layer normalizes Russian command names to their internal names
+bot.on("message", (msg) => {
+  // Only normalize if text exists and doesn't start with "/"
+  if (!msg.text || msg.text.startsWith("/")) return;
+
+  // Split message into words
+  const parts = msg.text.trim().split(/\s+/);
+  if (parts.length === 0) return;
+  const firstWord = parts[0].toLowerCase();
+  // Check if it's a known Russian command alias
+  const normalized = RUSSIAN_COMMAND_ALIASES[firstWord];
+  if (normalized) {
+    // Rebuild text as if user typed "/<normalized> ..." for downstream handlers
+    msg.text = "/" + normalized + (parts.length > 1 ? " " + parts.slice(1).join(" ") : "");
+  }
+});
+
 console.log("Users file:", USERS_FILE);
 console.log("Saved users loaded:", users.size);
 
