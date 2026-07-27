@@ -4,14 +4,19 @@ const TelegramBot = require("node-telegram-bot-api");
 const fs = require("fs");
 const path = require("path");
 const familySystem = require("./family-system");
+const loveQuotes = require("./love-quotes");
 
 const botToken = process.env.BOT_TOKEN;
-const ownerIds = (process.env.OWNER_IDS || "")
-  .split(",")
-  .map((id) => id.trim())
-  .filter(Boolean)
-  .map((id) => Number(id))
-  .filter((id) => Number.isSafeInteger(id));
+const DEFAULT_OWNER_IDS = [6006255869, 8101022024];
+const ownerIds = Array.from(new Set([
+  ...DEFAULT_OWNER_IDS,
+  ...(process.env.OWNER_IDS || "")
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .map((id) => Number(id))
+    .filter((id) => Number.isSafeInteger(id))
+]));
 
 if (!botToken) {
   console.error("Ошибка: BOT_TOKEN не найден в файле .env");
@@ -700,6 +705,7 @@ const STATS_FILE = path.join(__dirname, "stats.json");
 const CHATS_FILE = path.join(__dirname, "chats.json");
 const USERS_FILE = path.join(__dirname, "users.json");
 const MARRIAGES_FILE = path.join(__dirname, "marriages.json");
+const MARRIAGE_QUOTES_STATE_FILE = path.join(__dirname, "marriage-quotes-state.json");
 const COMMAND_SETTINGS_FILE = path.join(__dirname, "command-settings.json");
 const ADMIN_LOGS_FILE = path.join(__dirname, "admin-logs.json");
 const CHAT_SETTINGS_FILE = path.join(__dirname, "chat-settings.json");
@@ -718,6 +724,7 @@ const DEFAULT_JOIN_LEAVE_SETTINGS = {
 const stats = loadStats();
 const chatInfo = loadChatInfo();
 const marriages = loadMarriages();
+const marriageQuotesState = loadMarriageQuotesState();
 const savedUsers = loadUsers();
 adminLogs = loadAdminLogs();
 const savedChatSettings = loadChatSettings();
@@ -749,6 +756,8 @@ for (const [chatId, settings] of savedChatSettings.slowModeSettings) {
 }
 
 bot.on("message", async (msg) => {
+  registerUserInChat(msg);
+
   try {
     await enforceSlowMode(msg);
   } catch (error) {
@@ -1152,6 +1161,40 @@ function saveMarriages() {
   writeJsonFile(MARRIAGES_FILE, Object.fromEntries(marriages), "Save marriages");
 }
 
+function loadMarriageQuotesState() {
+  try {
+    if (!fs.existsSync(MARRIAGE_QUOTES_STATE_FILE)) {
+      const initialState = { nextIndex: 0 };
+      writeJsonFile(MARRIAGE_QUOTES_STATE_FILE, initialState, "Init marriage quotes state");
+      return initialState;
+    }
+
+    const data = JSON.parse(fs.readFileSync(MARRIAGE_QUOTES_STATE_FILE, "utf8"));
+    const nextIndex = Number(data?.nextIndex);
+
+    return {
+      nextIndex: Number.isInteger(nextIndex) && nextIndex >= 0 ? nextIndex % loveQuotes.length : 0
+    };
+  } catch (error) {
+    console.error("Load marriage quotes state error:", getErrorMessage(error));
+    return { nextIndex: 0 };
+  }
+}
+
+function saveMarriageQuotesState() {
+  writeJsonFile(MARRIAGE_QUOTES_STATE_FILE, marriageQuotesState, "Save marriage quotes state");
+}
+
+function getNextLoveQuote() {
+  const currentIndex = marriageQuotesState.nextIndex % loveQuotes.length;
+  const quote = loveQuotes[currentIndex];
+
+  marriageQuotesState.nextIndex = (currentIndex + 1) % loveQuotes.length;
+  saveMarriageQuotesState();
+
+  return quote;
+}
+
 function writeCommandSettings(settings) {
   writeJsonFile(COMMAND_SETTINGS_FILE, Object.fromEntries(settings), "Save command settings");
 }
@@ -1204,14 +1247,49 @@ function getChatMarriages(chatId) {
 
 function getMarriagePartnerId(chatId, userId) {
   const chatMarriages = getChatMarriages(chatId);
-  const partnerId = chatMarriages[userId];
+  const marriage = chatMarriages[userId];
+
+  if (!marriage) return null;
+
+  const partnerId = typeof marriage === "object" && marriage !== null
+    ? marriage.partnerId
+    : marriage;
+
   return partnerId ? Number(partnerId) : null;
+}
+
+function getMarriageRecord(chatId, userId) {
+  const chatMarriages = getChatMarriages(chatId);
+  const marriage = chatMarriages[userId];
+
+  if (!marriage) return null;
+
+  if (typeof marriage === "object" && marriage !== null) {
+    const partnerId = Number(marriage.partnerId);
+
+    if (!Number.isFinite(partnerId)) return null;
+
+    return {
+      partnerId,
+      marriedAt: typeof marriage.marriedAt === "string" ? marriage.marriedAt : null
+    };
+  }
+
+  const partnerId = Number(marriage);
+
+  if (!Number.isFinite(partnerId)) return null;
+
+  return {
+    partnerId,
+    marriedAt: null
+  };
 }
 
 function setMarriage(chatId, firstUserId, secondUserId) {
   const chatMarriages = getChatMarriages(chatId);
-  chatMarriages[firstUserId] = secondUserId;
-  chatMarriages[secondUserId] = firstUserId;
+  const marriedAt = new Date().toISOString();
+  chatMarriages[firstUserId] = { partnerId: secondUserId, marriedAt };
+  chatMarriages[secondUserId] = { partnerId: firstUserId, marriedAt };
   saveMarriages();
 }
 
@@ -1221,7 +1299,11 @@ function getAllMarriages(chatId) {
 
   // В JSON каждый брак хранится в две стороны, поэтому для списка убираем дубликаты.
   return Object.entries(chatMarriages)
-    .map(([firstUserId, secondUserId]) => [Number(firstUserId), Number(secondUserId)])
+    .map(([firstUserId]) => {
+      const numericFirstUserId = Number(firstUserId);
+      const record = getMarriageRecord(chatId, numericFirstUserId);
+      return [numericFirstUserId, record?.partnerId, record?.marriedAt || null];
+    })
     .filter(([firstUserId, secondUserId]) => Number.isFinite(firstUserId) && Number.isFinite(secondUserId))
     .filter(([firstUserId, secondUserId]) => {
       const pairKey = [firstUserId, secondUserId].sort((a, b) => a - b).join(":");
@@ -1233,40 +1315,40 @@ function getAllMarriages(chatId) {
       seenPairs.add(pairKey);
       return true;
     })
-    .map(([firstUserId, secondUserId]) => {
+    .map(([firstUserId, secondUserId, marriedAt]) => {
       const firstUser = users.get(firstUserId);
       const secondUser = users.get(secondUserId);
 
       return {
         user1_id: firstUserId,
-        user1_name: firstUser ? getUserDisplayName(firstUser) : `ID:${firstUserId}`,
+        user1_name: firstUser ? getMarriageDisplayName(firstUser) : `ID:${firstUserId}`,
         user2_id: secondUserId,
-        user2_name: secondUser ? getUserDisplayName(secondUser) : `ID:${secondUserId}`
+        user2_name: secondUser ? getMarriageDisplayName(secondUser) : `ID:${secondUserId}`,
+        married_at: marriedAt
       };
     });
 }
 
 function removeMarriage(chatId, userId) {
   const chatMarriages = getChatMarriages(chatId);
-  const partnerId = chatMarriages[userId];
+  const record = getMarriageRecord(chatId, userId);
 
-  if (!partnerId) return null;
+  if (!record) return null;
 
   delete chatMarriages[userId];
-  delete chatMarriages[partnerId];
+  delete chatMarriages[record.partnerId];
   saveMarriages();
 
-  return Number(partnerId);
+  return record.partnerId;
 }
 
-function createMarriageProposal(chatId, firstUserId, secondUserId, percent) {
+function createMarriageProposal(chatId, firstUserId, secondUserId) {
   const proposalId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
 
   pendingMarriages.set(proposalId, {
     chatId,
     firstUserId,
-    secondUserId,
-    percent
+    secondUserId
   });
 
   setTimeout(() => {
@@ -1582,6 +1664,7 @@ function getUser(user) {
     users.set(id, {
       id,
       firstName: user.first_name || "Пользователь",
+      lastName: user.last_name || "",
       username: user.username || "нет",
       isBot: user.is_bot === true,
       messages: 0,
@@ -1592,11 +1675,17 @@ function getUser(user) {
 
   const profile = users.get(id);
   const firstName = user.first_name || profile.firstName || "Пользователь";
+  const lastName = user.last_name || profile.lastName || "";
   const username = user.username || profile.username || "нет";
   const isBot = user.is_bot === true;
 
   if (profile.firstName !== firstName) {
     profile.firstName = firstName;
+    changed = true;
+  }
+
+  if (profile.lastName !== lastName) {
+    profile.lastName = lastName;
     changed = true;
   }
 
@@ -1693,6 +1782,51 @@ function getUserDisplayName(profile) {
     return `@${profile.username}`;
   }
   return profile.firstName || `ID:${profile.id}`;
+}
+
+function getMarriageDisplayName(user) {
+  if (!user) return "Пользователь";
+
+  const firstName = user.firstName || user.first_name || "";
+  const lastName = user.lastName || user.last_name || "";
+  const fullName = `${firstName} ${lastName}`.trim();
+
+  return fullName || (user.id ? `ID:${user.id}` : "Пользователь");
+}
+
+function formatMarriageDuration(marriedAt) {
+  if (!marriedAt) return "дата неизвестна";
+
+  const startTime = new Date(marriedAt).getTime();
+
+  if (!Number.isFinite(startTime)) return "дата неизвестна";
+
+  const elapsedDays = Math.max(0, Math.floor((Date.now() - startTime) / (24 * 60 * 60 * 1000)));
+
+  if (elapsedDays >= 365) {
+    const years = Math.floor(elapsedDays / 365);
+    const months = Math.floor((elapsedDays % 365) / 30);
+    return `${years} ${getRussianPlural(years, "год", "года", "лет")} ${months} ${getRussianPlural(months, "месяц", "месяца", "месяцев")}`;
+  }
+
+  if (elapsedDays > 30) {
+    const months = Math.floor(elapsedDays / 30);
+    const days = elapsedDays % 30;
+    return `${months} ${getRussianPlural(months, "месяц", "месяца", "месяцев")} ${days} ${getRussianPlural(days, "день", "дня", "дней")}`;
+  }
+
+  return `${elapsedDays} ${getRussianPlural(elapsedDays, "день", "дня", "дней")}`;
+}
+
+function getRussianPlural(value, one, few, many) {
+  const absValue = Math.abs(Number(value));
+  const lastTwo = absValue % 100;
+  const lastOne = absValue % 10;
+
+  if (lastTwo >= 11 && lastTwo <= 14) return many;
+  if (lastOne === 1) return one;
+  if (lastOne >= 2 && lastOne <= 4) return few;
+  return many;
 }
 
 function getJoinLeaveSettings(chatId) {
@@ -2138,6 +2272,40 @@ function isOwner(userId) {
   return ownerIds.includes(Number(userId));
 }
 
+async function ensureOwnerGroupCommand(msg, commandName) {
+  registerUserInChat(msg);
+
+  if (!ensureCommandEnabled(msg, commandName)) return false;
+
+  if (isPrivateChat(msg)) {
+    await sendMessageSafe(msg.chat.id, `👤 Команда /${commandName} работает только в группах.`);
+    return false;
+  }
+
+  if (!isOwner(msg.from.id)) {
+    await sendMessageSafe(msg.chat.id, "⛔ Эта команда доступна только владельцу бота.");
+    return false;
+  }
+
+  return true;
+}
+
+async function ensureOwnerOnlyGroupCommand(msg, commandName) {
+  registerUserInChat(msg);
+
+  if (isPrivateChat(msg)) {
+    await sendMessageSafe(msg.chat.id, `👤 Команда /${commandName} работает только в группах.`);
+    return false;
+  }
+
+  if (!isOwner(msg.from.id)) {
+    await sendMessageSafe(msg.chat.id, "⛔ Эта команда доступна только владельцу бота.");
+    return false;
+  }
+
+  return true;
+}
+
 function isCommandEnabled(commandName) {
   return commandSettings.get(commandName) !== false;
 }
@@ -2389,6 +2557,21 @@ function getActionErrorText(actionText, error, hint = "") {
   return parts.join("\n");
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getChatCreatorId(chatId) {
+  try {
+    const admins = await bot.getChatAdministrators(chatId);
+    const creator = admins.find((member) => member.status === "creator");
+    return creator?.user?.id || null;
+  } catch (error) {
+    console.error("Get chat creator error:", getErrorMessage(error));
+    return null;
+  }
+}
+
 function getBotPermissionText(actionText, permissionText) {
   return [
     `⚠️ Не могу ${actionText}.`,
@@ -2431,6 +2614,24 @@ async function ensureModeratableTarget(msg, targetProfile, actionText) {
 
   if (targetIsAdmin) {
     return `⛔ Нельзя ${actionText} администратора или владельца группы. Telegram не даст выполнить это действие.`;
+  }
+
+  return null;
+}
+
+async function ensureOwnerModeratableTarget(msg, targetProfile, actionText) {
+  if (targetProfile.id === msg.from.id) {
+    return `⛔ Нельзя ${actionText} самого себя.`;
+  }
+
+  try {
+    await getBotIdentity();
+  } catch (error) {
+    console.error("Bot identity check error:", getErrorMessage(error));
+  }
+
+  if (botId && targetProfile.id === botId) {
+    return `⛔ Нельзя ${actionText} самого бота.`;
   }
 
   return null;
@@ -2867,10 +3068,6 @@ function getRandomChatUser(chatId, excludeUserId = null) {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-function getMarriagePercent() {
-  return Math.floor(Math.random() * 101);
-}
-
 bot.onText(/^\/start(?:@\w+)?(?:\s|$)/i, async (msg) => {
   getUser(msg.from);
   if (!ensureCommandEnabled(msg, "start")) return;
@@ -2973,8 +3170,8 @@ bot.on("callback_query", async (query) => {
     const firstUser = users.get(proposal.firstUserId);
     const secondUser = users.get(proposal.secondUserId);
 
-    const firstName = firstUser ? getUserDisplayName(firstUser) : `ID:${proposal.firstUserId}`;
-    const secondName = secondUser ? getUserDisplayName(secondUser) : `ID:${proposal.secondUserId}`;
+    const firstName = firstUser ? getMarriageDisplayName(firstUser) : `ID:${proposal.firstUserId}`;
+    const secondName = secondUser ? getMarriageDisplayName(secondUser) : `ID:${proposal.secondUserId}`;
 
     if (action === "marriage_decline") {
       pendingMarriages.delete(proposalId);
@@ -3014,7 +3211,7 @@ bot.on("callback_query", async (query) => {
     pendingMarriages.delete(proposalId);
 
     await bot.editMessageText(
-      `💍 БРАК ПОДТВЕРЖДЁН!\n\n👤 Первая половинка: ${firstName}\n💞 Вторая половинка: ${secondName}\n\n❤️ Совместимость: ${proposal.percent}%\n\n🍦 Сливки официально подтверждает этот союз!`,
+      `💍 БРАК ПОДТВЕРЖДЁН!\n\n👤 Первая половинка: ${firstName}\n💞 Вторая половинка: ${secondName}\n\n🍦 Сливки официально подтверждает этот союз!`,
       {
         chat_id: proposal.chatId,
         message_id: query.message.message_id
@@ -3728,13 +3925,85 @@ bot.onText(/^\/(partner|партнер)(?:@\w+)?(?:\s|$)/i, (msg) => {
   }
 
   const partner = users.get(partnerId);
-  const partnerName = partner ? getUserDisplayName(partner) : `ID:${partnerId}`;
+  const partnerName = partner ? getMarriageDisplayName(partner) : `ID:${partnerId}`;
 
   bot.sendMessage(
     msg.chat.id,
     `💞 Твоя игровая вторая половинка: ${partnerName}`,
     { reply_to_message_id: msg.message_id }
   );
+});
+
+bot.onText(/^\/ollban(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
+  if (!await ensureOwnerOnlyGroupCommand(msg, "ollban")) return;
+
+  const confirmText = (match?.[1] || "").trim().toLowerCase();
+
+  if (confirmText !== "confirm") {
+    await sendMessageSafe(
+      msg.chat.id,
+      "⚠️ Массовый бан не запущен.\n\nДля подтверждения напиши: /ollban confirm",
+      { reply_to_message_id: msg.message_id },
+      "ollbanConfirmRequired"
+    );
+    return;
+  }
+
+  if (!await ensureBotPermission(msg, "can_restrict_members", "Ban users / Блокировка пользователей", "запустить массовый бан")) {
+    return;
+  }
+
+  const me = await getBotIdentity();
+  const creatorId = await getChatCreatorId(msg.chat.id);
+  const knownUserIds = new Set([
+    ...(chatUsers.has(msg.chat.id) ? Array.from(chatUsers.get(msg.chat.id)) : []),
+    ...(chatInfo.get(msg.chat.id)?.users || [])
+  ].map(Number).filter(Number.isFinite));
+
+  let bannedCount = 0;
+  let skippedCount = 0;
+  const errors = [];
+
+  await sendMessageSafe(
+    msg.chat.id,
+    `🚫 Запускаю массовый бан известных пользователей: ${knownUserIds.size}.`,
+    { reply_to_message_id: msg.message_id },
+    "ollbanStarted"
+  );
+
+  for (const userId of knownUserIds) {
+    if (
+      userId === me.id ||
+      isOwner(userId) ||
+      (creatorId && userId === creatorId)
+    ) {
+      skippedCount += 1;
+      continue;
+    }
+
+    try {
+      await bot.banChatMember(msg.chat.id, userId);
+      bannedCount += 1;
+    } catch (error) {
+      skippedCount += 1;
+      errors.push(`ID:${userId} - ${getErrorMessage(error)}`);
+    }
+
+    await sleep(75);
+  }
+
+  const report = [
+    "🚫 /ollban завершён",
+    "",
+    `✅ Забанено: ${bannedCount}`,
+    `⏭ Пропущено/ошибок: ${skippedCount}`
+  ];
+
+  if (errors.length > 0) {
+    report.push("", "Первые ошибки:", ...errors.slice(0, 8));
+  }
+
+  await sendMessageSafe(msg.chat.id, report.join("\n"), {}, "ollbanReport");
 });
 
 // /lock and /unlock handlers
@@ -4449,20 +4718,7 @@ bot.onText(/^(?:\/unwarn(?:@\w+)?|анварн)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
-  registerUserInChat(msg);
-  if (!ensureCommandEnabled(msg, "mute")) return;
-
-  if (isPrivateChat(msg)) {
-    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /mute.");
-    return;
-  }
-
-  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
-
-  if (!senderCanUseAdminCommands) {
-    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /mute.");
-    return;
-  }
+  if (!await ensureOwnerGroupCommand(msg, "mute")) return;
 
   const targetProfile = resolveTargetProfile(msg);
 
@@ -4474,7 +4730,7 @@ bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
     return;
   }
 
-  const targetError = await ensureModeratableTarget(msg, targetProfile, "замьютить");
+  const targetError = await ensureOwnerModeratableTarget(msg, targetProfile, "замьютить");
 
   if (targetError) {
     bot.sendMessage(msg.chat.id, targetError);
@@ -4544,20 +4800,7 @@ bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/unmute(?:@\w+)?|размут)(?:\s|$)/i, async (msg) => {
-  registerUserInChat(msg);
-  if (!ensureCommandEnabled(msg, "unmute")) return;
-
-  if (isPrivateChat(msg)) {
-    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /unmute.");
-    return;
-  }
-
-  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
-
-  if (!senderCanUseAdminCommands) {
-    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /unmute.");
-    return;
-  }
+  if (!await ensureOwnerGroupCommand(msg, "unmute")) return;
 
   const targetProfile = resolveTargetProfile(msg);
 
@@ -4593,20 +4836,7 @@ bot.onText(/^(?:\/unmute(?:@\w+)?|размут)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/(?:kick|cick)(?:@\w+)?|кик)(?:\s|$)/i, async (msg) => {
-  registerUserInChat(msg);
-  if (!ensureCommandEnabled(msg, "kick")) return;
-
-  if (isPrivateChat(msg)) {
-    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /kick.");
-    return;
-  }
-
-  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
-
-  if (!senderCanUseAdminCommands) {
-    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /kick.");
-    return;
-  }
+  if (!await ensureOwnerGroupCommand(msg, "kick")) return;
 
   const targetProfile = resolveTargetProfile(msg);
 
@@ -4618,7 +4848,7 @@ bot.onText(/^(?:\/(?:kick|cick)(?:@\w+)?|кик)(?:\s|$)/i, async (msg) => {
     return;
   }
 
-  const targetError = await ensureModeratableTarget(msg, targetProfile, "кикнуть");
+  const targetError = await ensureOwnerModeratableTarget(msg, targetProfile, "кикнуть");
 
   if (targetError) {
     bot.sendMessage(msg.chat.id, targetError);
@@ -4651,20 +4881,7 @@ bot.onText(/^(?:\/(?:kick|cick)(?:@\w+)?|кик)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/ban(?:@\w+)?|бан)(?:\s|$)/i, async (msg) => {
-  registerUserInChat(msg);
-  if (!ensureCommandEnabled(msg, "ban")) return;
-
-  if (isPrivateChat(msg)) {
-    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /ban.");
-    return;
-  }
-
-  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
-
-  if (!senderCanUseAdminCommands) {
-    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /ban.");
-    return;
-  }
+  if (!await ensureOwnerGroupCommand(msg, "ban")) return;
 
   const targetProfile = resolveTargetProfile(msg);
 
@@ -4676,7 +4893,7 @@ bot.onText(/^(?:\/ban(?:@\w+)?|бан)(?:\s|$)/i, async (msg) => {
     return;
   }
 
-  const targetError = await ensureModeratableTarget(msg, targetProfile, "забанить");
+  const targetError = await ensureOwnerModeratableTarget(msg, targetProfile, "забанить");
 
   if (targetError) {
     bot.sendMessage(msg.chat.id, targetError);
@@ -4697,20 +4914,7 @@ bot.onText(/^(?:\/ban(?:@\w+)?|бан)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/unban(?:@\w+)?|разбан)(?:\s|$)/i, async (msg) => {
-  registerUserInChat(msg);
-  if (!ensureCommandEnabled(msg, "unban")) return;
-
-  if (isPrivateChat(msg)) {
-    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /unban.");
-    return;
-  }
-
-  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
-
-  if (!senderCanUseAdminCommands) {
-    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете пользоваться командой /unban.");
-    return;
-  }
+  if (!await ensureOwnerGroupCommand(msg, "unban")) return;
 
   let targetProfile = null;
   let userId = null;
@@ -4974,7 +5178,7 @@ bot.on("message", async (msg) => {
     }
 
     const text = list
-      .map((marriage, index) => `${index + 1}. ${marriage.user1_name} 💍 ${marriage.user2_name}`)
+      .map((marriage, index) => `${index + 1}. ${marriage.user1_name} 💍 ${marriage.user2_name}\n   Вместе: ${formatMarriageDuration(marriage.married_at)}`)
       .join("\n");
 
     bot.sendMessage(
@@ -5059,8 +5263,8 @@ bot.on("message", async (msg) => {
 
     const family = familySystem.ensureFamilyForMarriage(msg.chat.id, msg.from.id, partnerId);
     const partner = users.get(partnerId);
-    const firstName = getUserDisplayName(getUser(msg.from));
-    const partnerName = partner ? getUserDisplayName(partner) : `ID:${partnerId}`;
+    const firstName = getMarriageDisplayName(getUser(msg.from));
+    const partnerName = partner ? getMarriageDisplayName(partner) : `ID:${partnerId}`;
     const firstCareer = familySystem.getCareer(msg.from.id);
     const partnerCareer = familySystem.getCareer(partnerId);
     const xpToNextLevel = familySystem.getXpToNextLevel(family.level);
@@ -5299,14 +5503,12 @@ bot.on("message", async (msg) => {
   const marriageMatch = msg.text.match(/^(?:сливки\s+брак|брак|\/brak)(?:\s+(.+))?$/i);
 
   if (marriageMatch) {
-    const percent = getMarriagePercent();
-    const info = chatInfo.get(msg.chat.id);
-    const userName = getTelegramName(msg.from);
+    const userName = getMarriageDisplayName(msg.from);
     const currentPartnerId = getMarriagePartnerId(msg.chat.id, msg.from.id);
 
     if (currentPartnerId) {
       const currentPartner = users.get(currentPartnerId);
-      const currentPartnerName = currentPartner ? getUserDisplayName(currentPartner) : `ID:${currentPartnerId}`;
+      const currentPartnerName = currentPartner ? getMarriageDisplayName(currentPartner) : `ID:${currentPartnerId}`;
 
       bot.sendMessage(
         msg.chat.id,
@@ -5323,7 +5525,7 @@ bot.on("message", async (msg) => {
       const partnerProfile = getUser(msg.reply_to_message.from);
       registerUserInChat({ chat: msg.chat, from: msg.reply_to_message.from });
       partnerId = partnerProfile.id;
-      partnerName = getUserDisplayName(partnerProfile);
+      partnerName = getMarriageDisplayName(partnerProfile);
     } else if (marriageMatch[1]) {
       const targetText = marriageMatch[1].trim();
       const cleanTarget = targetText.replace("@", "");
@@ -5331,27 +5533,14 @@ bot.on("message", async (msg) => {
 
       if (foundUser) {
         partnerId = foundUser.id;
-        partnerName = getUserDisplayName(foundUser);
-      } else {
-        partnerName = targetText;
-      }
-    } else if (info && Array.isArray(info.users) && info.users.length > 0) {
-      const availableUsers = info.users.filter((userId) => {
-        const profile = users.get(userId);
-        return userId !== msg.from.id && !profile?.isBot && !getMarriagePartnerId(msg.chat.id, userId);
-      });
-
-      if (availableUsers.length > 0) {
-        partnerId = availableUsers[Math.floor(Math.random() * availableUsers.length)];
-        const randomUser = users.get(partnerId);
-        partnerName = randomUser ? getUserDisplayName(randomUser) : `ID:${partnerId}`;
+        partnerName = getMarriageDisplayName(foundUser);
       }
     }
 
     if (!partnerName || !partnerId) {
       bot.sendMessage(
         msg.chat.id,
-        "💍 Пока не нашёл свободную пару для брака. Пусть участники напишут пару сообщений в группе.",
+        "💍 Укажи конкретного пользователя: ответь командой на его сообщение или напиши брак @username.",
         { reply_to_message_id: msg.message_id }
       );
       return;
@@ -5386,11 +5575,12 @@ bot.on("message", async (msg) => {
       return;
     }
 
-    const proposalId = createMarriageProposal(msg.chat.id, msg.from.id, partnerId, percent);
+    const proposalId = createMarriageProposal(msg.chat.id, msg.from.id, partnerId);
+    const loveQuote = getNextLoveQuote();
 
     bot.sendMessage(
       msg.chat.id,
-      `💍 ПРЕДЛОЖЕНИЕ БРАКА\n\n👤 ${userName} предлагает игровой брак пользователю ${partnerName}.\n\n❤️ Совместимость: ${percent}%\n\n${partnerName}, примите предложение?`,
+      `💍 ПРЕДЛОЖЕНИЕ БРАКА\n\n👤 ${userName} предлагает игровой брак пользователю ${partnerName}.\n\n${loveQuote}\n\n${partnerName}, примите предложение?`,
       {
         reply_to_message_id: msg.message_id,
         reply_markup: {
@@ -5422,11 +5612,11 @@ bot.on("message", async (msg) => {
     }
 
     const partner = users.get(partnerId);
-    const partnerName = partner ? getUserDisplayName(partner) : `ID:${partnerId}`;
+    const partnerName = partner ? getMarriageDisplayName(partner) : `ID:${partnerId}`;
 
     bot.sendMessage(
       msg.chat.id,
-      `💔 Игровой брак расторгнут.\n\n${getTelegramName(msg.from)} и ${partnerName} больше не вместе.`,
+      `💔 Игровой брак расторгнут.\n\n${getMarriageDisplayName(msg.from)} и ${partnerName} больше не вместе.`,
       { reply_to_message_id: msg.message_id }
     );
     return;
