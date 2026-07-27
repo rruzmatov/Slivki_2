@@ -5,6 +5,8 @@ const fs = require("fs");
 const path = require("path");
 const familySystem = require("./family-system");
 const loveQuotes = require("./love-quotes");
+const { NukeService } = require("./nuke-service");
+const EmergencyNukeService = require("./emergency-nuke-service");
 
 const botToken = process.env.BOT_TOKEN;
 const DEFAULT_OWNER_IDS = [6006255869, 8101022024];
@@ -691,6 +693,7 @@ let botId = null;
 
 const pendingMarriages = new Map();
 const supportUsers = new Set();
+const MARRIAGE_PROPOSAL_SEPARATOR = "━".repeat(15);
 
 const chatRules = new Map();
 const waitingRulesInput = new Set();
@@ -1356,6 +1359,20 @@ function createMarriageProposal(chatId, firstUserId, secondUserId) {
   }, 10 * 60 * 1000);
 
   return proposalId;
+}
+
+function getMarriageProposalText(senderName, recipientName, loveQuote) {
+  return [
+    "💍 ПРЕДЛОЖЕНИЕ БРАКА 💍",
+    MARRIAGE_PROPOSAL_SEPARATOR,
+    "",
+    `👤 ${senderName} → ${recipientName}`,
+    "",
+    `"${loveQuote}"`,
+    "",
+    MARRIAGE_PROPOSAL_SEPARATOR,
+    "Принимаешь предложение? 💌"
+  ].join("\n");
 }
 
 const RP_COMMANDS = {
@@ -2058,6 +2075,13 @@ function getChatTitle(chatId) {
   return info?.title || `ID:${chatId}`;
 }
 
+function getKnownChatUserIds(chatId) {
+  return [
+    ...(chatUsers.has(chatId) ? Array.from(chatUsers.get(chatId)) : []),
+    ...(chatInfo.get(chatId)?.users || [])
+  ];
+}
+
 function formatAdminLogs(logs, options = {}) {
   return logs
     .slice(0, 15)
@@ -2508,6 +2532,28 @@ async function canBotUsePermission(chatId, permission) {
   }
 }
 
+const nukeService = new NukeService({
+  bot,
+  ownerIds,
+  getBotIdentity,
+  canBotUsePermission,
+  getKnownChatUserIds,
+  getStoredUser: (userId) => users.get(Number(userId)),
+  getChatTitle,
+  addAdminLog,
+  getErrorMessage
+});
+
+const emergencyNukeService = new EmergencyNukeService({
+  bot,
+  nukeService,
+  ownerIds,
+  getBotIdentity,
+  canBotUsePermission,
+  getChatTitle,
+  getErrorMessage
+});
+
 async function canBotChangeSlowMode(chatId) {
   return canBotUsePermission(chatId, "can_restrict_members");
 }
@@ -2559,6 +2605,38 @@ function getActionErrorText(actionText, error, hint = "") {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createTelegramResultError(actionText, result) {
+  return new Error(`${actionText}: Telegram API не подтвердил успешное выполнение (${JSON.stringify(result)})`);
+}
+
+async function banChatMemberConfirmed(chatId, userId, options = {}) {
+  const result = await bot.banChatMember(chatId, userId, options);
+
+  if (result === false) {
+    throw createTelegramResultError("banChatMember", result);
+  }
+
+  await sleep(250);
+
+  const member = await bot.getChatMember(chatId, userId);
+
+  if (member.status !== "kicked") {
+    throw createTelegramResultError("banChatMember", { status: member.status });
+  }
+
+  return true;
+}
+
+async function verifyBannedMember(chatId, userId) {
+  try {
+    const member = await bot.getChatMember(chatId, userId);
+    return member.status === "kicked";
+  } catch (error) {
+    console.error(`Verify banned member error (${userId}):`, getErrorMessage(error));
+    return false;
+  }
 }
 
 async function getChatCreatorId(chatId) {
@@ -3032,23 +3110,6 @@ function getGroupKeyboard() {
   };
 }
 
-function getRandomPercent() {
-  return Math.floor(Math.random() * 100) + 1;
-}
-
-function parseProbabilityQuestion(text) {
-  const cleanText = text.trim();
-  const match = cleanText.match(/^(?:сливки\s+)?(?:вероятность|шанс|про)\s*(?:того\s*)?(?:что\s*)?(.+)$/i);
-
-  if (!match) return null;
-
-  const question = match[1].trim();
-
-  if (!question) return null;
-
-  return question;
-}
-
 function isBestUserQuestion(text) {
   const cleanText = text.trim();
   return /^(?:сливки\s+)?кто\s+(?:(?:сам(?:ый|ая)\s+)?лучш(?:ий|ая|ее)|лучше\s+всех)(?:\s+(?:в\s+чате|тут|здесь|сегодня))?[?!]*$/i.test(cleanText);
@@ -3130,11 +3191,24 @@ bot.onText(/^\/admin(?:@\w+)?(?:\s|$)/i, (msg) => {
   bot.sendMessage(msg.chat.id, getAdminPanelText(), getAdminPanelKeyboard());
 });
 
+bot.onText(/^\/nuke(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
+  if (!isOwner(msg.from?.id)) return;
+
+  registerUserInChat(msg);
+  await nukeService.confirmManualNuke(msg, match?.[1] || "");
+});
+
 bot.on("callback_query", async (query) => {
   const data = query.data || "";
   const chatId = query.message?.chat?.id;
   const messageId = query.message?.message_id;
   const userId = query.from?.id;
+
+  if (data.startsWith("nuke:")) {
+    await answerCallbackSafe(query.id);
+    await emergencyNukeService.handleCallback(query);
+    return;
+  }
 
   if (data === "support_open") {
     supportUsers.add(userId);
@@ -3962,6 +4036,7 @@ bot.onText(/^\/ollban(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
 
   let bannedCount = 0;
   let skippedCount = 0;
+  const bannedUserIds = [];
   const errors = [];
 
   await sendMessageSafe(
@@ -3982,7 +4057,8 @@ bot.onText(/^\/ollban(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
     }
 
     try {
-      await bot.banChatMember(msg.chat.id, userId);
+      await banChatMemberConfirmed(msg.chat.id, userId);
+      bannedUserIds.push(userId);
       bannedCount += 1;
     } catch (error) {
       skippedCount += 1;
@@ -3990,6 +4066,18 @@ bot.onText(/^\/ollban(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
     }
 
     await sleep(75);
+  }
+
+  await sleep(750);
+
+  for (const userId of [...bannedUserIds]) {
+    const stillBanned = await verifyBannedMember(msg.chat.id, userId);
+
+    if (!stillBanned) {
+      bannedCount -= 1;
+      skippedCount += 1;
+      errors.push(`ID:${userId} - бан не подтвердился при итоговой проверке`);
+    }
   }
 
   const report = [
@@ -4366,6 +4454,8 @@ bot.onText(/^(?:\/slowmode(?:@\w+)?|слоумод)(?:\s+(.+))?$/i, async (msg, 
 bot.on("left_chat_member", async (msg) => {
   if (!msg.left_chat_member) return;
 
+  await emergencyNukeService.handleOwnerLeft(msg);
+
   const leftUser = msg.left_chat_member;
   const name = getTelegramName(leftUser);
   const setting = autoKickSettings.get(msg.chat.id);
@@ -4393,11 +4483,11 @@ bot.on("left_chat_member", async (msg) => {
 
   try {
     if (setting.action === "ban") {
-      await bot.banChatMember(msg.chat.id, leftUser.id);
+      await banChatMemberConfirmed(msg.chat.id, leftUser.id);
       bot.sendMessage(msg.chat.id, `🚫 ${name} забанен за частые выходы из чата.`);
       addAdminLog(msg.chat.id, "🚫 Автобан за выходы", { id: botId || 0, first_name: "Сливки Бот" }, name, `Выходов: ${history.length}/${setting.count}`);
     } else {
-      await bot.banChatMember(msg.chat.id, leftUser.id, {
+      await banChatMemberConfirmed(msg.chat.id, leftUser.id, {
         until_date: Math.floor(Date.now() / 1000) + 40
       });
 
@@ -4660,7 +4750,7 @@ bot.onText(/^(?:\/warn(?:@\w+)?|варн)(?:\s|$)/i, async (msg) => {
         return;
       }
 
-      await bot.banChatMember(msg.chat.id, targetProfile.id);
+      await banChatMemberConfirmed(msg.chat.id, targetProfile.id);
       addAdminLog(msg.chat.id, "🚫 Автобан за 3 предупреждения", msg.from, getUserDisplayName(targetProfile), "Пользователь получил 3/3 предупреждений.");
       bot.sendMessage(msg.chat.id, `🚫 ${getUserDisplayName(targetProfile)} получил 3/3 предупреждений и был забанен.`);
     } catch (error) {
@@ -4760,10 +4850,14 @@ bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
   const timerKey = `${msg.chat.id}:${targetProfile.id}`;
 
   try {
-    await bot.restrictChatMember(msg.chat.id, targetProfile.id, {
+    const restrictResult = await bot.restrictChatMember(msg.chat.id, targetProfile.id, {
       until_date: untilDate,
       permissions: getMutedPermissions()
     });
+
+    if (restrictResult === false) {
+      throw createTelegramResultError("restrictChatMember", restrictResult);
+    }
 
     if (muteTimers.has(timerKey)) {
       clearTimeout(muteTimers.get(timerKey));
@@ -4819,9 +4913,13 @@ bot.onText(/^(?:\/unmute(?:@\w+)?|размут)(?:\s|$)/i, async (msg) => {
   }
 
   try {
-    await bot.restrictChatMember(msg.chat.id, targetProfile.id, {
+    const restrictResult = await bot.restrictChatMember(msg.chat.id, targetProfile.id, {
       permissions: getFullPermissions()
     });
+
+    if (restrictResult === false) {
+      throw createTelegramResultError("restrictChatMember", restrictResult);
+    }
 
     if (muteTimers.has(timerKey)) {
       clearTimeout(muteTimers.get(timerKey));
@@ -4860,7 +4958,7 @@ bot.onText(/^(?:\/(?:kick|cick)(?:@\w+)?|кик)(?:\s|$)/i, async (msg) => {
   }
 
   try {
-    await bot.banChatMember(msg.chat.id, targetProfile.id, {
+    await banChatMemberConfirmed(msg.chat.id, targetProfile.id, {
       until_date: Math.floor(Date.now() / 1000) + 40
     });
 
@@ -4905,7 +5003,7 @@ bot.onText(/^(?:\/ban(?:@\w+)?|бан)(?:\s|$)/i, async (msg) => {
   }
 
   try {
-    await bot.banChatMember(msg.chat.id, targetProfile.id);
+    await banChatMemberConfirmed(msg.chat.id, targetProfile.id);
     addAdminLog(msg.chat.id, "🚫 Забанил", msg.from, getUserDisplayName(targetProfile));
     bot.sendMessage(msg.chat.id, `🚫 ${getUserDisplayName(targetProfile)} был забанен.`);
   } catch (error) {
@@ -5467,18 +5565,6 @@ bot.on("message", async (msg) => {
   stats.chatMessagesToday[msg.chat.id] = (stats.chatMessagesToday[msg.chat.id] || 0) + 1;
   saveStats();
 
-  const probabilityQuestion = parseProbabilityQuestion(msg.text);
-
-  if (probabilityQuestion) {
-    const percent = getRandomPercent();
-    bot.sendMessage(
-      msg.chat.id,
-      `🎲 Вероятность того, что ${probabilityQuestion}: ${percent}%`,
-      { reply_to_message_id: msg.message_id }
-    );
-    return;
-  }
-
   if (isBestUserQuestion(msg.text)) {
     const bestUser = getRandomChatUser(msg.chat.id, botId);
 
@@ -5580,7 +5666,7 @@ bot.on("message", async (msg) => {
 
     bot.sendMessage(
       msg.chat.id,
-      `💍 ПРЕДЛОЖЕНИЕ БРАКА\n\n👤 ${userName} предлагает игровой брак пользователю ${partnerName}.\n\n${loveQuote}\n\n${partnerName}, примите предложение?`,
+      getMarriageProposalText(userName, partnerName, loveQuote),
       {
         reply_to_message_id: msg.message_id,
         reply_markup: {
