@@ -109,6 +109,23 @@ async function isCommandAddressedToThisBot(username) {
   }
 
   return String(username).toLowerCase() === String(botUsername || "").toLowerCase();
+
+  // Достаёт @username из команды, если он указан явно: /cmd@botname
+  function getCommandTargetUsername(text) {
+    const match = String(text || "").trim().match(/^\/[A-Za-z0-9_]+@([A-Za-z0-9_]{5,32})/);
+    return match ? match[1] : null;
+  }
+
+  // Решает, стоит ли вообще реагировать на неизвестную команду.
+  async function shouldReportUnknownCommand(msg) {
+    const targetUsername = getCommandTargetUsername(msg.text);
+
+    if (targetUsername) {
+      return isCommandAddressedToThisBot(targetUsername);
+    }
+
+    return isPrivateChat(msg);
+  }
 }
 
 // Единая защита всех bot.onText-хендлеров от тихих падений.
@@ -5964,9 +5981,10 @@ bot.on("message", async (msg) => {
   );
 });
 
-bot.on("message", (msg) => {
+bot.on("message", async (msg) => {
   if (!isSlashCommandMessage(msg)) return;
   if (isKnownSlashCommand(msg.text, msg)) return;
+  if (!(await shouldReportUnknownCommand(msg))) return;
 
   bot.sendMessage(
     msg.chat.id,
