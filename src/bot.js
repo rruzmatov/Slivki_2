@@ -7,6 +7,9 @@ const familySystem = require("./family-system");
 const loveQuotes = require("./love-quotes");
 const { NukeService } = require("./nuke-service");
 const EmergencyNukeService = require("./emergency-nuke-service");
+const { CurrencyStore } = require("./currency");
+const { parseBet, playDice, playCasino } = require("./betting-games");
+const { QuizManager, QUIZ_REWARD } = require("./quiz");
 
 const botToken = process.env.BOT_TOKEN;
 const DEFAULT_OWNER_IDS = [6006255869, 8101022024];
@@ -78,6 +81,10 @@ function isKnownSlashCommand(text, msg = null) {
     (!msg || !isPrivateChat(msg)) && manualSlashCommandRegexes.some((regexp) => regexMatches(regexp, value));
 }
 
+function isSlashCommandMessage(msg) {
+  return typeof msg?.text === "string" && msg.text.startsWith("/");
+}
+
 async function replyHandlerError(msg) {
   if (!msg?.chat?.id) return;
 
@@ -86,6 +93,22 @@ async function replyHandlerError(msg) {
     HANDLER_ERROR_TEXT,
     { reply_to_message_id: msg.message_id }
   ).catch(() => { });
+}
+
+async function isCommandAddressedToThisBot(username) {
+  if (!username) return true;
+
+  if (!botUsername) {
+    try {
+      const me = await getBotIdentity();
+      botUsername = me.username;
+    } catch (error) {
+      console.error("Command target getMe error:", getErrorMessage(error));
+      return false;
+    }
+  }
+
+  return String(username).toLowerCase() === String(botUsername || "").toLowerCase();
 }
 
 // Единая защита всех bot.onText-хендлеров от тихих падений.
@@ -712,6 +735,7 @@ const MARRIAGE_QUOTES_STATE_FILE = path.join(__dirname, "marriage-quotes-state.j
 const COMMAND_SETTINGS_FILE = path.join(__dirname, "command-settings.json");
 const ADMIN_LOGS_FILE = path.join(__dirname, "admin-logs.json");
 const CHAT_SETTINGS_FILE = path.join(__dirname, "chat-settings.json");
+const CURRENCY_FILE = path.join(__dirname, "currency-users.json");
 
 const MAX_TELEGRAM_MESSAGE_LENGTH = 4096;
 const MAX_SAFE_REPLY_LENGTH = 3900;
@@ -729,6 +753,8 @@ const chatInfo = loadChatInfo();
 const marriages = loadMarriages();
 const marriageQuotesState = loadMarriageQuotesState();
 const savedUsers = loadUsers();
+const currencyStore = new CurrencyStore(CURRENCY_FILE, { startingBalance: 100 });
+const quizManager = new QuizManager();
 adminLogs = loadAdminLogs();
 const savedChatSettings = loadChatSettings();
 
@@ -759,6 +785,10 @@ for (const [chatId, settings] of savedChatSettings.slowModeSettings) {
 }
 
 bot.on("message", async (msg) => {
+  if (msg.from) {
+    currencyStore.ensureUser(msg.from);
+  }
+
   registerUserInChat(msg);
 
   try {
@@ -1559,6 +1589,10 @@ const DEFAULT_COMMAND_SETTINGS = [
   ["start", true],
   ["menu", true],
   ["commands", true],
+  ["balance", true],
+  ["dice", true],
+  ["casino", true],
+  ["quiz", true],
   ["profile", true],
   ["top", true],
   ["admins", true],
@@ -1605,6 +1639,10 @@ const groupCommands = [
   { command: "start", description: "🍦 запуск бота" },
   { command: "menu", description: "📋 меню" },
   { command: "commands", description: "📜 все команды" },
+  { command: "balance", description: "💰 баланс монет" },
+  { command: "dice", description: "🎲 кости на монеты" },
+  { command: "casino", description: "🎰 слот-машина" },
+  { command: "quiz", description: "❓ викторина" },
   { command: "profile", description: "👤 профиль" },
   { command: "top", description: "🏆 топ активных" },
   { command: "admins", description: "👑 список администраторов" },
@@ -2927,6 +2965,10 @@ const COMMANDS_PAGES = [
     commands: [
       { setting: "menu", sticker: "📋", command: "/menu", description: "главное меню" },
       { setting: "commands", sticker: "📜", command: "/commands", description: "красивый список команд" },
+      { setting: "balance", sticker: "💰", command: "/balance", description: "баланс монет" },
+      { setting: "dice", sticker: "🎲", command: "/dice 10", description: "кости на ставку" },
+      { setting: "casino", sticker: "🎰", command: "/casino 10", description: "слот-машина на ставку" },
+      { setting: "quiz", sticker: "❓", command: "/quiz", description: "викторина за монеты" },
       { setting: "menu", sticker: "🆘", command: "/help", description: "как пользоваться командами" },
       { setting: "profile", sticker: "👤", command: "/profile", description: "профиль пользователя" },
       { setting: "top", sticker: "🏆", command: "/top", description: "топ активных участников" },
@@ -3115,6 +3157,11 @@ function isBestUserQuestion(text) {
   return /^(?:сливки\s+)?кто\s+(?:(?:сам(?:ый|ая)\s+)?лучш(?:ий|ая|ее)|лучше\s+всех)(?:\s+(?:в\s+чате|тут|здесь|сегодня))?[?!]*$/i.test(cleanText);
 }
 
+function getSlivkiWhoSubject(text) {
+  const match = String(text || "").trim().match(/^сливки\s+кто\s+(.+?)\s*[?!]*$/i);
+  return match?.[1]?.trim() || "";
+}
+
 function getRandomChatUser(chatId, excludeUserId = null) {
   const knownUserIds = chatUsers.has(chatId)
     ? Array.from(chatUsers.get(chatId))
@@ -3129,7 +3176,9 @@ function getRandomChatUser(chatId, excludeUserId = null) {
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
-bot.onText(/^\/start(?:@\w+)?(?:\s|$)/i, async (msg) => {
+bot.onText(/^\/start(?:@([A-Za-z0-9_]{5,32}))?(?:\s|$)/i, async (msg, match) => {
+  if (!await isCommandAddressedToThisBot(match?.[1])) return;
+
   getUser(msg.from);
   if (!ensureCommandEnabled(msg, "start")) return;
   registerUserInChat(msg);
@@ -3198,6 +3247,123 @@ bot.onText(/^\/nuke(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
   await nukeService.confirmManualNuke(msg, match?.[1] || "");
 });
 
+function getBetValidationError(user, bet, commandName) {
+  const balance = currencyStore.getBalance(user);
+
+  if (balance <= 0) {
+    return "💰 На балансе 0 монет. Попробуй заработать монеты в викторине.";
+  }
+
+  if (!bet) {
+    return `💰 Укажи ставку целым числом.\n\nПример: /${commandName} 10\nТвой баланс: ${balance} монет.`;
+  }
+
+  if (bet > balance) {
+    return `💰 Недостаточно монет для ставки ${bet}.\n\nТвой баланс: ${balance} монет.`;
+  }
+
+  return "";
+}
+
+bot.onText(/^\/balance(?:@\w+)?(?:\s|$)/i, (msg) => {
+  getUser(msg.from);
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "balance")) return;
+
+  const balance = currencyStore.getBalance(msg.from);
+
+  bot.sendMessage(
+    msg.chat.id,
+    `💰 Баланс: ${balance} монет`,
+    { reply_to_message_id: msg.message_id }
+  );
+});
+
+bot.onText(/^\/dice(?:@\w+)?(?:\s+(\S+))?\s*$/i, (msg, match) => {
+  getUser(msg.from);
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "dice")) return;
+
+  const bet = parseBet(match?.[1]);
+  const validationError = getBetValidationError(msg.from, bet, "dice");
+
+  if (validationError) {
+    bot.sendMessage(msg.chat.id, validationError, { reply_to_message_id: msg.message_id });
+    return;
+  }
+
+  currencyStore.subtractBalance(msg.from, bet);
+  const result = playDice();
+  const payout = result.won ? bet * result.multiplier : 0;
+  const newBalance = result.won
+    ? currencyStore.addBalance(msg.from, payout)
+    : currencyStore.getBalance(msg.from);
+
+  bot.sendMessage(
+    msg.chat.id,
+    [
+      `🎲 Выпало: ${result.roll}`,
+      result.won ? `✅ Победа! Выигрыш: ${payout} монет (x${result.multiplier}).` : `❌ Проигрыш. Ставка ${bet} монет сгорела.`,
+      `💰 Новый баланс: ${newBalance} монет`
+    ].join("\n"),
+    { reply_to_message_id: msg.message_id }
+  );
+});
+
+bot.onText(/^\/casino(?:@\w+)?(?:\s+(\S+))?\s*$/i, (msg, match) => {
+  getUser(msg.from);
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "casino")) return;
+
+  const bet = parseBet(match?.[1]);
+  const validationError = getBetValidationError(msg.from, bet, "casino");
+
+  if (validationError) {
+    bot.sendMessage(msg.chat.id, validationError, { reply_to_message_id: msg.message_id });
+    return;
+  }
+
+  currencyStore.subtractBalance(msg.from, bet);
+  const result = playCasino();
+  const payout = Math.floor(bet * result.multiplier);
+  const newBalance = result.won
+    ? currencyStore.addBalance(msg.from, payout)
+    : currencyStore.getBalance(msg.from);
+
+  bot.sendMessage(
+    msg.chat.id,
+    [
+      `🎰 ${result.slots.join(" ")}`,
+      result.won ? `✅ Выигрыш: ${payout} монет (x${result.multiplier}).` : `❌ Не повезло. Ставка ${bet} монет сгорела.`,
+      `💰 Новый баланс: ${newBalance} монет`
+    ].join("\n"),
+    { reply_to_message_id: msg.message_id }
+  );
+});
+
+bot.onText(/^\/quiz(?:@\w+)?(?:\s|$)/i, (msg) => {
+  getUser(msg.from);
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "quiz")) return;
+
+  const { quizId, question } = quizManager.createQuiz(msg.chat.id);
+
+  bot.sendMessage(
+    msg.chat.id,
+    [
+      "❓ Викторина",
+      "",
+      question.question,
+      "",
+      `Первый правильный ответ получит ${QUIZ_REWARD} монет.`
+    ].join("\n"),
+    {
+      reply_to_message_id: msg.message_id,
+      ...quizManager.getKeyboard(quizId, question)
+    }
+  );
+});
+
 bot.on("callback_query", async (query) => {
   const data = query.data || "";
   const chatId = query.message?.chat?.id;
@@ -3207,6 +3373,46 @@ bot.on("callback_query", async (query) => {
   if (data.startsWith("nuke:")) {
     await answerCallbackSafe(query.id);
     await emergencyNukeService.handleCallback(query);
+    return;
+  }
+
+  if (data.startsWith("quiz:")) {
+    const [, quizId, optionIndex] = data.split(":");
+    const result = quizManager.answer(quizId, optionIndex);
+
+    if (result.status === "missing") {
+      await answerCallbackSafe(query.id, { text: "Викторина уже завершена.", show_alert: true });
+      return;
+    }
+
+    if (result.status === "answered") {
+      await answerCallbackSafe(query.id, { text: "На этот вопрос уже ответили.", show_alert: true });
+      return;
+    }
+
+    if (result.status === "wrong") {
+      await answerCallbackSafe(query.id, { text: "Неверно. Попробуй другой вопрос.", show_alert: true });
+      return;
+    }
+
+    if (query.message?.chat && query.from) {
+      registerUserInChat({ chat: query.message.chat, from: query.from });
+    }
+
+    const newBalance = currencyStore.addBalance(query.from, result.reward);
+    const winner = getUser(query.from);
+    const winnerName = getUserDisplayName(winner);
+
+    await answerCallbackSafe(query.id, { text: `Правильно! +${result.reward} монет` });
+
+    if (chatId && messageId) {
+      await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => { });
+    }
+
+    await bot.sendMessage(
+      chatId,
+      `✅ ${winnerName} ответил(а) правильно и заработал(а) ${result.reward} монет.\n💰 Баланс: ${newBalance} монет`
+    );
     return;
   }
 
@@ -5585,6 +5791,28 @@ bot.on("message", async (msg) => {
     return;
   }
 
+  const slivkiWhoSubject = getSlivkiWhoSubject(msg.text);
+
+  if (slivkiWhoSubject) {
+    const randomUser = getRandomChatUser(msg.chat.id, botId);
+
+    if (!randomUser) {
+      bot.sendMessage(
+        msg.chat.id,
+        "Пока не знаю участников этого чата. Пусть участники напишут пару сообщений, и я смогу выбрать.",
+        { reply_to_message_id: msg.message_id }
+      );
+      return;
+    }
+
+    bot.sendMessage(
+      msg.chat.id,
+      `${getUserDisplayName(randomUser)} — ${slivkiWhoSubject}`,
+      { reply_to_message_id: msg.message_id }
+    );
+    return;
+  }
+
   // --- "сливки брак" feature
   const marriageMatch = msg.text.match(/^(?:сливки\s+брак|брак|\/brak)(?:\s+(.+))?$/i);
 
@@ -5737,7 +5965,7 @@ bot.on("message", async (msg) => {
 });
 
 bot.on("message", (msg) => {
-  if (!msg.text || !msg.text.trim().startsWith("/")) return;
+  if (!isSlashCommandMessage(msg)) return;
   if (isKnownSlashCommand(msg.text, msg)) return;
 
   bot.sendMessage(
