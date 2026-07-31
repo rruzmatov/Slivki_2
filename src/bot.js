@@ -12,6 +12,7 @@ const { parseBet, playDice, playCasino } = require("./betting-games");
 const { QuizManager, QUIZ_REWARD } = require("./quiz");
 
 const botToken = process.env.BOT_TOKEN;
+
 const DEFAULT_OWNER_IDS = [6006255869, 8101022024];
 const ownerIds = Array.from(new Set([
   ...DEFAULT_OWNER_IDS,
@@ -22,6 +23,11 @@ const ownerIds = Array.from(new Set([
     .map((id) => Number(id))
     .filter((id) => Number.isSafeInteger(id))
 ]));
+
+const {
+  RandomPicksService,
+  registerRandomPickCommands
+} = require("./commands/random-picks");
 
 if (!botToken) {
   console.error("Ошибка: BOT_TOKEN не найден в файле .env");
@@ -109,23 +115,23 @@ async function isCommandAddressedToThisBot(username) {
   }
 
   return String(username).toLowerCase() === String(botUsername || "").toLowerCase();
+}
 
-  // Достаёт @username из команды, если он указан явно: /cmd@botname
-  function getCommandTargetUsername(text) {
-    const match = String(text || "").trim().match(/^\/[A-Za-z0-9_]+@([A-Za-z0-9_]{5,32})/);
-    return match ? match[1] : null;
+// Достаёт @username из команды, если он указан явно: /cmd@botname
+function getCommandTargetUsername(text) {
+  const match = String(text || "").trim().match(/^\/[A-Za-z0-9_]+@([A-Za-z0-9_]{5,32})/);
+  return match ? match[1] : null;
+}
+
+// Решает, стоит ли вообще реагировать на неизвестную команду.
+async function shouldReportUnknownCommand(msg) {
+  const targetUsername = getCommandTargetUsername(msg.text);
+
+  if (targetUsername) {
+    return isCommandAddressedToThisBot(targetUsername);
   }
 
-  // Решает, стоит ли вообще реагировать на неизвестную команду.
-  async function shouldReportUnknownCommand(msg) {
-    const targetUsername = getCommandTargetUsername(msg.text);
-
-    if (targetUsername) {
-      return isCommandAddressedToThisBot(targetUsername);
-    }
-
-    return isPrivateChat(msg);
-  }
+  return isPrivateChat(msg);
 }
 
 // Единая защита всех bot.onText-хендлеров от тихих падений.
@@ -1625,6 +1631,8 @@ const DEFAULT_COMMAND_SETTINGS = [
   ["mute", true],
   ["unmute", true],
   ["kick", true],
+  ["action", true],
+  ["tagall", true],
   ["ban", true],
   ["unban", true],
   ["clear", true],
@@ -1647,7 +1655,6 @@ const DEFAULT_COMMAND_SETTINGS = [
   ["razvod", true],
   ["partner", true],
   ["career", true],
-  ["action", true]
 ];
 
 const commandSettings = loadCommandSettings();
@@ -1693,7 +1700,8 @@ const groupCommands = [
   { command: "joinleave", description: "👋 +входы / +выходы" },
   { command: "brak", description: "💍 Брак" },
   { command: "razvod", description: "💔 Развод" },
-  { command: "partner", description: "💞 Вторая половинка" }
+  { command: "partner", description: "💞 Вторая половинка" },
+  { command: "tagall", description: "📢 позвать всех участников" }
 ];
 
 let botUsername = "";
@@ -2351,24 +2359,6 @@ function isOwner(userId) {
   return ownerIds.includes(Number(userId));
 }
 
-async function ensureOwnerGroupCommand(msg, commandName) {
-  registerUserInChat(msg);
-
-  if (!ensureCommandEnabled(msg, commandName)) return false;
-
-  if (isPrivateChat(msg)) {
-    await sendMessageSafe(msg.chat.id, `👤 Команда /${commandName} работает только в группах.`);
-    return false;
-  }
-
-  if (!isOwner(msg.from.id)) {
-    await sendMessageSafe(msg.chat.id, "⛔ Эта команда доступна только владельцу бота.");
-    return false;
-  }
-
-  return true;
-}
-
 async function ensureOwnerOnlyGroupCommand(msg, commandName) {
   registerUserInChat(msg);
 
@@ -2607,6 +2597,20 @@ const emergencyNukeService = new EmergencyNukeService({
   canBotUsePermission,
   getChatTitle,
   getErrorMessage
+});
+
+const randomPicksService = new RandomPicksService({
+  bot,
+  getKnownChatUserIds,
+  getStoredUser: (userId) => users.get(Number(userId)),
+  getUserDisplayName,
+  isUserAdmin,
+  getErrorMessage
+});
+
+registerRandomPickCommands(bot, randomPicksService, {
+  registerUserInChat,
+  isPrivateChat
 });
 
 async function canBotChangeSlowMode(chatId) {
@@ -2994,7 +2998,8 @@ const COMMANDS_PAGES = [
       { setting: "logs", sticker: "📋", command: "/logs", description: "логи админ-действий" },
       { setting: "id", sticker: "🆔", command: "/id", description: "ID пользователя или сообщения" },
       { setting: "emojiid", sticker: "💎", command: "/emojiid", description: "ID Premium Emoji из ответа" },
-      { setting: "chatinfo", sticker: "ℹ️", command: "/chatinfo", description: "информация о группе" }
+      { setting: "chatinfo", sticker: "ℹ️", command: "/chatinfo", description: "информация о группе" },
+      { setting: "tagall", sticker: "📢", command: "/tagall или тег все", description: "позвать всех по одному" }
     ]
   },
   {
@@ -4491,6 +4496,76 @@ bot.onText(/^([+-])\s*(?:топик|topic)$/i, async (msg, match) => {
   }
 });
 
+const TAG_ALL_DELAY_MS = 1200;
+
+function escapeHtmlText(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function buildUserMentionHtml(profile) {
+  const name = escapeHtmlText(getUserDisplayName(profile) || `ID:${profile.id}`);
+  return `<a href="tg://user?id=${profile.id}">${name}</a>`;
+}
+
+async function sendTagMentionWithRetry(chatId, mentionHtml) {
+  let attempts = 0;
+
+  while (attempts < 2) {
+    try {
+      await bot.sendMessage(chatId, mentionHtml, { parse_mode: "HTML" });
+      return true;
+    } catch (error) {
+      const retryAfter = error?.response?.body?.parameters?.retry_after;
+
+      if (retryAfter && attempts === 0) {
+        await sleep((retryAfter + 1) * 1000);
+        attempts += 1;
+        continue;
+      }
+
+      console.error("Tag all send error:", getErrorMessage(error));
+      return false;
+    }
+  }
+
+  return false;
+}
+
+bot.onText(/^(?:\/tagall(?:@\w+)?|тег все|позвать всех)(?:\s+([\s\S]+))?$/i, async (msg, match) => {
+  if (!await ensureGroupAdminCommand(msg, "tagall")) return;
+
+  const customText = (match[1] || "").trim();
+  const knownUserIds = Array.from(new Set(getKnownChatUserIds(msg.chat.id).map(Number).filter(Number.isFinite)));
+
+  const candidates = knownUserIds
+    .map((userId) => users.get(userId))
+    .filter((profile) => profile && !profile.isBot && profile.id !== botId);
+
+  if (candidates.length === 0) {
+    await sendMessageSafe(msg.chat.id, "📢 Пока не знаю участников этого чата, чтобы позвать всех.");
+    return;
+  }
+
+  await sendMessageSafe(
+    msg.chat.id,
+    `📢 Зову всех участников (${candidates.length})${customText ? `:\n${customText}` : "."}`,
+    { reply_to_message_id: msg.message_id }
+  );
+
+  let calledCount = 0;
+
+  for (const profile of candidates) {
+    const ok = await sendTagMentionWithRetry(msg.chat.id, buildUserMentionHtml(profile));
+    if (ok) calledCount += 1;
+    await sleep(TAG_ALL_DELAY_MS);
+  }
+
+  addAdminLog(msg.chat.id, "📢 Позвал всех участников", msg.from, "Вся группа", `Вызвано: ${calledCount}/${candidates.length}`);
+});
+
 bot.onText(/^(?:\/admins(?:@\w+)?|админы)(?:\s|$)/i, async (msg) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "admins")) return;
@@ -4527,6 +4602,8 @@ bot.onText(/^(?:\/admins(?:@\w+)?|админы)(?:\s|$)/i, async (msg) => {
     );
   }
 });
+
+
 
 // /slowmode command handler
 bot.onText(/^(?:\/slowmode(?:@\w+)?|слоумод)(?:\s+(.+))?$/i, async (msg, match) => {
@@ -5031,7 +5108,7 @@ bot.onText(/^(?:\/unwarn(?:@\w+)?|анварн)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
-  if (!await ensureOwnerGroupCommand(msg, "mute")) return;
+  if (!await ensureGroupAdminCommand(msg, "mute")) return;
 
   const targetProfile = resolveTargetProfile(msg);
 
@@ -5043,7 +5120,7 @@ bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
     return;
   }
 
-  const targetError = await ensureOwnerModeratableTarget(msg, targetProfile, "замьютить");
+  const targetError = await ensureModeratableTarget(msg, targetProfile, "замьютить");
 
   if (targetError) {
     bot.sendMessage(msg.chat.id, targetError);
@@ -5117,7 +5194,7 @@ bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/unmute(?:@\w+)?|размут)(?:\s|$)/i, async (msg) => {
-  if (!await ensureOwnerGroupCommand(msg, "unmute")) return;
+  if (!await ensureGroupAdminCommand(msg, "unmute")) return;
 
   const targetProfile = resolveTargetProfile(msg);
 
@@ -5157,7 +5234,7 @@ bot.onText(/^(?:\/unmute(?:@\w+)?|размут)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/(?:kick|cick)(?:@\w+)?|кик)(?:\s|$)/i, async (msg) => {
-  if (!await ensureOwnerGroupCommand(msg, "kick")) return;
+  if (!await ensureGroupAdminCommand(msg, "kick")) return;
 
   const targetProfile = resolveTargetProfile(msg);
 
@@ -5169,7 +5246,7 @@ bot.onText(/^(?:\/(?:kick|cick)(?:@\w+)?|кик)(?:\s|$)/i, async (msg) => {
     return;
   }
 
-  const targetError = await ensureOwnerModeratableTarget(msg, targetProfile, "кикнуть");
+  const targetError = await ensureModeratableTarget(msg, targetProfile, "кикнуть");
 
   if (targetError) {
     bot.sendMessage(msg.chat.id, targetError);
@@ -5202,7 +5279,7 @@ bot.onText(/^(?:\/(?:kick|cick)(?:@\w+)?|кик)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/ban(?:@\w+)?|бан)(?:\s|$)/i, async (msg) => {
-  if (!await ensureOwnerGroupCommand(msg, "ban")) return;
+  if (!await ensureGroupAdminCommand(msg, "ban")) return;
 
   const targetProfile = resolveTargetProfile(msg);
 
@@ -5214,7 +5291,7 @@ bot.onText(/^(?:\/ban(?:@\w+)?|бан)(?:\s|$)/i, async (msg) => {
     return;
   }
 
-  const targetError = await ensureOwnerModeratableTarget(msg, targetProfile, "забанить");
+  const targetError = await ensureModeratableTarget(msg, targetProfile, "забанить");
 
   if (targetError) {
     bot.sendMessage(msg.chat.id, targetError);
@@ -5235,7 +5312,7 @@ bot.onText(/^(?:\/ban(?:@\w+)?|бан)(?:\s|$)/i, async (msg) => {
 });
 
 bot.onText(/^(?:\/unban(?:@\w+)?|разбан)(?:\s|$)/i, async (msg) => {
-  if (!await ensureOwnerGroupCommand(msg, "unban")) return;
+  if (!await ensureGroupAdminCommand(msg, "unban")) return;
 
   let targetProfile = null;
   let userId = null;
@@ -5337,12 +5414,29 @@ bot.onText(/^\/(clear|claer)(?:@\w+)?(?:\s+(\d+))?$/i, async (msg, match) => {
   let lastDeleteError = null;
 
   for (let messageId = fromMessageId; messageId <= toMessageId; messageId++) {
-    try {
-      await bot.deleteMessage(msg.chat.id, messageId);
-      deletedCount += 1;
-    } catch (error) {
-      lastDeleteError = error;
+    let attempts = 0;
+    let succeeded = false;
+
+    while (attempts < 2 && !succeeded) {
+      try {
+        await bot.deleteMessage(msg.chat.id, messageId);
+        succeeded = true;
+        deletedCount += 1;
+      } catch (error) {
+        const retryAfter = error?.response?.body?.parameters?.retry_after;
+
+        if (retryAfter && attempts === 0) {
+          await sleep((retryAfter + 1) * 1000);
+          attempts += 1;
+          continue;
+        }
+
+        lastDeleteError = error;
+        break;
+      }
     }
+
+    await sleep(35);
   }
 
   if (deletedCount === 0) {
@@ -5994,4 +6088,3 @@ bot.on("message", async (msg) => {
     console.error("Unknown command fallback error:", getErrorMessage(error));
   });
 });
-// lalalalalalala musor, eto nado udalit
