@@ -9,6 +9,7 @@ const loveQuotes = require("./love-quotes");
 const { NukeService } = require("./nuke-service");
 const EmergencyNukeService = require("./emergency-nuke-service");
 const { CurrencyStore } = require("./currency");
+const { OwnerEconomyCommandService, parseOwnerCoinGrant } = require("./owner-economy-command");
 const { parseBet, playDice, playCasino } = require("./betting-games");
 const { CATEGORY_LABELS, DIFFICULTY_LABELS, QuizManager, QUIZ_REWARD } = require("./quiz");
 const { formatMarriageDetails } = require("./marriage-time");
@@ -43,6 +44,7 @@ const {
 const botToken = process.env.BOT_TOKEN;
 
 const DEFAULT_OWNER_IDS = [6006255869, 8101022024];
+const ownerIdsEnvironmentLoaded = Boolean(process.env.OWNER_IDS?.trim());
 const ownerIds = Array.from(new Set([
   ...DEFAULT_OWNER_IDS,
   ...(process.env.OWNER_IDS || "")
@@ -877,6 +879,12 @@ const marriages = loadMarriages();
 const marriageQuotesState = loadMarriageQuotesState();
 const savedUsers = loadUsers();
 const currencyStore = new CurrencyStore(CURRENCY_FILE, { startingBalance: 100 });
+const ownerEconomyCommandService = new OwnerEconomyCommandService({
+  currencyStore,
+  ownerIds,
+  ownerIdsEnvironmentLoaded,
+  logger: console
+});
 const quizManager = new QuizManager(QUIZ_STATE_FILE);
 const bugReportStore = new BugReportStore(BUG_REPORTS_FILE);
 adminLogs = loadAdminLogs();
@@ -3542,7 +3550,26 @@ function formatGameRound(gameType, round) {
   ].join("\n");
 }
 
-bot.onText(/^\/balance(?:@\w+)?(?:\s|$)/i, (msg) => {
+bot.onText(/^дай\s+мне(?:\s|$).*$/i, async (msg) => {
+  try {
+    const result = ownerEconomyCommandService.execute(msg);
+    if (result.responseText) await bot.sendMessage(msg.chat.id, result.responseText);
+  } catch (error) {
+    const correlationId = recordRuntimeError("owner_economy_command", error, {
+      chatType: msg.chat?.type,
+      fromId: msg.from?.id,
+      selectedAccount: msg.from?.id ? `currency_store:user:${msg.from.id}` : null
+    });
+    await sendMessageSafe(
+      msg.chat.id,
+      `❌ Не удалось начислить монеты. Код диагностики: ${correlationId}`,
+      {},
+      "ownerEconomyCommandFailure"
+    );
+  }
+});
+
+bot.onText(/^\/(?:balance|баланс)(?:@\w+)?(?:\s|$)/i, (msg) => {
   getUser(msg.from);
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "balance")) return;
@@ -6615,6 +6642,7 @@ bot.on("message", async (msg) => {
   if (!isPrivateChat(msg)) return;
   if (!msg.text) return;
   if (msg.text.startsWith("/")) return;
+  if (parseOwnerCoinGrant(msg.text).attempted) return;
   const supportExpiresAt = supportUsers.get(msg.from.id);
   if (!supportExpiresAt || supportExpiresAt <= Date.now()) {
     supportUsers.delete(msg.from.id);

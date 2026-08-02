@@ -59,6 +59,15 @@ test("stability commands, aliases and callback fallback are registered", () => {
   assert.match(source, /processedCallbackQueries/);
 });
 
+test("main polling bot registers the hidden owner coin command on the legacy balance store", () => {
+  assert.match(source, /new OwnerEconomyCommandService\(\{[\s\S]*?currencyStore,[\s\S]*?ownerIds,[\s\S]*?\}\)/);
+  assert.match(source, /bot\.onText\(\/\^дай\\s\+мне/);
+  assert.match(source, /ownerEconomyCommandService\.execute\(msg\)/);
+  assert.match(source, /\/\(\?:balance\|баланс\)/);
+  assert.match(source, /if \(parseOwnerCoinGrant\(msg\.text\)\.attempted\) return;/);
+  assert.doesNotMatch(source, /ownerEconomyCommandService[\s\S]{0,500}rpg/i);
+});
+
 test("Telegram admin commands remain reply-only with all legacy aliases", () => {
   const handler = source.match(/bot\.onText\(\/\^\(\?:\(\?:сетка[\s\S]*?\n\}\);/)?.[0] || "";
   assert.ok(handler, "Telegram admin handler not found");
