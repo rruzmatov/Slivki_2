@@ -10,6 +10,7 @@
     "build": "tsc --noEmit",
     "lint": "biome lint src/rpg src/rpg-bot.ts",
     "compile": "tsc",
+    "test": "npm run test:stability",
     "test:rpg": "npm run compile && node --test dist/rpg/tests/*.test.js src/tests/*.test.js",
     "test:architecture": "npm run compile && node --test dist/rpg/tests/architecture.test.js",
     "test:transport": "npm run compile && node --test dist/rpg/tests/transport-*.test.js",

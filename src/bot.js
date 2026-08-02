@@ -10,6 +10,7 @@ const { NukeService } = require("./nuke-service");
 const EmergencyNukeService = require("./emergency-nuke-service");
 const { CurrencyStore } = require("./currency");
 const { OwnerEconomyCommandService, parseOwnerCoinGrant } = require("./owner-economy-command");
+const { PaymentError, PaymentService, parsePayCommand } = require("./payment-service");
 const { parseBet, playDice, playCasino } = require("./betting-games");
 const { CATEGORY_LABELS, DIFFICULTY_LABELS, QuizManager, QUIZ_REWARD } = require("./quiz");
 const { formatMarriageDetails } = require("./marriage-time");
@@ -885,6 +886,7 @@ const ownerEconomyCommandService = new OwnerEconomyCommandService({
   ownerIdsEnvironmentLoaded,
   logger: console
 });
+const paymentService = new PaymentService(currencyStore);
 const quizManager = new QuizManager(QUIZ_STATE_FILE);
 const bugReportStore = new BugReportStore(BUG_REPORTS_FILE);
 adminLogs = loadAdminLogs();
@@ -3581,6 +3583,87 @@ bot.onText(/^\/(?:balance|баланс)(?:@\w+)?(?:\s|$)/i, (msg) => {
     `💰 Баланс: ${balance} монет`,
     { reply_parameters: { message_id: msg.message_id } }
   );
+});
+
+function resolvePaymentRecipient(msg, targetToken) {
+  if (!targetToken) {
+    return msg.reply_to_message?.from ? getUser(msg.reply_to_message.from) : null;
+  }
+  if (/^@?[A-Za-z0-9_]{5,32}$/.test(targetToken) && !/^\d+$/.test(targetToken)) {
+    return findUserByUsername(targetToken);
+  }
+  if (/^\d+$/.test(targetToken)) {
+    const userId = Number(targetToken);
+    return Number.isSafeInteger(userId) ? users.get(userId) || null : null;
+  }
+  return null;
+}
+
+bot.onText(/^\/pay(?:@[A-Za-z0-9_]{5,32})?(?:\s|$)/i, async (msg) => {
+  getUser(msg.from);
+  registerUserInChat(msg);
+  let payment;
+  let receiver;
+  try {
+    const parsed = parsePayCommand(msg.text);
+    receiver = resolvePaymentRecipient(msg, parsed.targetToken);
+    if (!receiver && !parsed.targetToken && !msg.reply_to_message?.from) {
+      throw new PaymentError(
+        "RECIPIENT_REQUIRED",
+        "⚠️ Укажите получателя ответом на сообщение, через @username или Telegram ID."
+      );
+    }
+    const operationId = `pay:${msg.chat.id}:${msg.message_id}`;
+    payment = paymentService.transfer({
+      sender: msg.from,
+      receiver,
+      amount: parsed.amount,
+      operationId,
+      idempotencyKey: operationId,
+      correlationId: operationId
+    });
+  } catch (error) {
+    if (error instanceof PaymentError) {
+      await sendMessageSafe(
+        msg.chat.id,
+        error.userMessage,
+        { reply_parameters: { message_id: msg.message_id } },
+        "payValidation"
+      );
+      return;
+    }
+    const correlationId = recordRuntimeError("pay.transfer", error, {
+      chatId: msg.chat.id,
+      senderId: msg.from.id,
+      receiverId: receiver?.id || null
+    });
+    await sendMessageSafe(
+      msg.chat.id,
+      `❌ Не удалось выполнить перевод. Код диагностики: ${correlationId}`,
+      { reply_parameters: { message_id: msg.message_id } },
+      "payTransferFailure"
+    );
+    return;
+  }
+
+  await sendMessageSafe(
+    msg.chat.id,
+    payment.senderText,
+    { reply_parameters: { message_id: msg.message_id } },
+    "paySenderReceipt"
+  );
+  if (!payment.operation.replayed) {
+    try {
+      await bot.sendMessage(receiver.id, payment.receiverText);
+    } catch (error) {
+      const correlationId = recordRuntimeError("pay.notification", error, {
+        operationId: payment.operation.operationId,
+        senderId: msg.from.id,
+        receiverId: receiver.id
+      });
+      console.error(`Pay notification error (${correlationId}):`, getErrorMessage(error));
+    }
+  }
 });
 
 bot.onText(/^\/dice(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {

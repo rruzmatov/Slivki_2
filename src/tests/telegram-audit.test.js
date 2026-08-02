@@ -68,6 +68,22 @@ test("main polling bot registers the hidden owner coin command on the legacy bal
   assert.doesNotMatch(source, /ownerEconomyCommandService[\s\S]{0,500}rpg/i);
 });
 
+test("main polling bot registers /pay for reply, username and known Telegram ID", () => {
+  const handler = source.match(/bot\.onText\(\/\^\\\/pay[\s\S]*?\n\}\);/)?.[0] || "";
+  const resolver = source.match(/function resolvePaymentRecipient\([\s\S]*?\n\}/)?.[0] || "";
+  assert.ok(handler, "/pay handler not found");
+  assert.ok(resolver, "/pay recipient resolver not found");
+  assert.match(handler, /parsePayCommand\(msg\.text\)/);
+  assert.match(handler, /resolvePaymentRecipient\(msg, parsed\.targetToken\)/);
+  assert.match(resolver, /msg\.reply_to_message\?\.from/);
+  assert.match(resolver, /findUserByUsername\(targetToken\)/);
+  assert.match(resolver, /users\.get\(userId\)/);
+  assert.match(handler, /paymentService\.transfer\(/);
+  assert.match(handler, /bot\.sendMessage\(receiver\.id, payment\.receiverText\)/);
+  assert.match(handler, /if \(!payment\.operation\.replayed\)/);
+  assert.doesNotMatch(handler, /isPrivateChat|rpg|inventory|transport|family/i);
+});
+
 test("Telegram admin commands remain reply-only with all legacy aliases", () => {
   const handler = source.match(/bot\.onText\(\/\^\(\?:\(\?:сетка[\s\S]*?\n\}\);/)?.[0] || "";
   assert.ok(handler, "Telegram admin handler not found");

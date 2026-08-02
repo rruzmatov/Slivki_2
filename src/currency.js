@@ -195,6 +195,72 @@ class CurrencyStore {
     return { ...operation, replayed: false };
   }
 
+  transferOnce(sender, receiver, input) {
+    const operationId = String(input?.operationId || "").trim();
+    const idempotencyKey = String(input?.idempotencyKey || operationId).trim();
+    const correlationId = String(input?.correlationId || operationId).trim();
+    const amount = Number(input?.amount);
+    const senderId = Number(sender?.id);
+    const receiverId = Number(receiver?.id);
+    if (!operationId || !idempotencyKey || !correlationId || !Number.isSafeInteger(amount) || amount <= 0 ||
+      !Number.isSafeInteger(senderId) || !Number.isSafeInteger(receiverId) || senderId === receiverId) {
+      throw new Error("Invalid transfer operation");
+    }
+    const existing = this.operations[operationId];
+    if (existing) {
+      if (existing.type !== "transfer" || existing.idempotencyKey !== idempotencyKey ||
+        Number(existing.senderId) !== senderId || Number(existing.receiverId) !== receiverId || existing.amount !== amount) {
+        throw new Error("Transfer idempotency conflict");
+      }
+      return { ...existing, replayed: true };
+    }
+
+    const senderProfile = this.ensureUser(sender);
+    const receiverProfile = this.ensureUser(receiver);
+    if (!senderProfile || !receiverProfile) throw new Error("Currency transfer users are required");
+    if (senderProfile.balance < amount) return null;
+
+    const senderBalanceBefore = senderProfile.balance;
+    const receiverBalanceBefore = receiverProfile.balance;
+    const senderBalanceAfter = senderBalanceBefore - amount;
+    const receiverBalanceAfter = receiverBalanceBefore + amount;
+    if (!Number.isSafeInteger(senderBalanceAfter) || senderBalanceAfter < 0 ||
+      !Number.isSafeInteger(receiverBalanceAfter) || receiverBalanceAfter < 0) {
+      throw new Error("Invalid balance after transfer");
+    }
+
+    const operationsBefore = { ...this.operations };
+    const operation = {
+      operationId,
+      idempotencyKey,
+      correlationId,
+      type: "transfer",
+      reason: "transfer",
+      senderId,
+      receiverId,
+      amount,
+      currency: "coins",
+      senderBalanceBefore,
+      senderBalanceAfter,
+      receiverBalanceBefore,
+      receiverBalanceAfter,
+      balanceAfter: senderBalanceAfter,
+      metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {},
+      createdAt: new Date().toISOString()
+    };
+    senderProfile.balance = senderBalanceAfter;
+    receiverProfile.balance = receiverBalanceAfter;
+    this.operations[operationId] = operation;
+    this.pruneOperations();
+    if (!this.saveData()) {
+      senderProfile.balance = senderBalanceBefore;
+      receiverProfile.balance = receiverBalanceBefore;
+      this.operations = operationsBefore;
+      throw new Error("Currency storage write failed");
+    }
+    return { ...operation, replayed: false };
+  }
+
   pruneOperations(now = Date.now()) {
     for (const [operationId, operation] of Object.entries(this.operations)) {
       if (Date.parse(operation.createdAt) < now - OPERATION_RETENTION_MS) delete this.operations[operationId];
@@ -223,7 +289,15 @@ class CurrencyStore {
 function isValidOperation(operation) {
   if (!operation || typeof operation !== "object" || typeof operation.operationId !== "string" ||
     !Number.isSafeInteger(operation.balanceAfter) || !Number.isFinite(Date.parse(operation.createdAt))) return false;
-  return operation.type === "credit" ? Number.isSafeInteger(operation.amount) : Number.isSafeInteger(operation.bet);
+  if (operation.type === "credit") return Number.isSafeInteger(operation.amount) && operation.amount > 0;
+  if (operation.type === "transfer") {
+    return Number.isSafeInteger(operation.senderId) && Number.isSafeInteger(operation.receiverId) &&
+      operation.senderId !== operation.receiverId && Number.isSafeInteger(operation.amount) && operation.amount > 0 &&
+      typeof operation.idempotencyKey === "string" && typeof operation.correlationId === "string" &&
+      Number.isSafeInteger(operation.senderBalanceBefore) && Number.isSafeInteger(operation.senderBalanceAfter) &&
+      Number.isSafeInteger(operation.receiverBalanceBefore) && Number.isSafeInteger(operation.receiverBalanceAfter);
+  }
+  return Number.isSafeInteger(operation.bet);
 }
 
 module.exports = {

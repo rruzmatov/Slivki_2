@@ -52,3 +52,53 @@ test("bet settlement is atomic, non-negative and idempotent across restart", () 
   assert.equal(restarted.settleBet(user, { operationId: "too-large", bet: 131, multiplier: 2 }), null);
   assert.equal(restarted.getBalance(user), 130);
 });
+
+test("currency transfer is atomic, persisted and idempotent across restart", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "slivki-transfer-"));
+  const file = path.join(directory, "currency.json");
+  const sender = { id: 10, first_name: "Sender" };
+  const receiver = { id: 20, first_name: "Receiver" };
+  const store = new CurrencyStore(file, { startingBalance: 100 });
+  const first = store.transferOnce(sender, receiver, {
+    operationId: "pay:chat:1",
+    idempotencyKey: "pay:chat:1",
+    correlationId: "pay:chat:1",
+    amount: 30
+  });
+  assert.equal(first.senderBalanceBefore, 100);
+  assert.equal(first.senderBalanceAfter, 70);
+  assert.equal(first.receiverBalanceBefore, 100);
+  assert.equal(first.receiverBalanceAfter, 130);
+
+  const restarted = new CurrencyStore(file, { startingBalance: 100 });
+  const replay = restarted.transferOnce(sender, receiver, {
+    operationId: "pay:chat:1",
+    idempotencyKey: "pay:chat:1",
+    correlationId: "pay:chat:1",
+    amount: 30
+  });
+  assert.equal(replay.replayed, true);
+  assert.equal(restarted.getBalance(sender), 70);
+  assert.equal(restarted.getBalance(receiver), 130);
+  assert.equal(restarted.operations["pay:chat:1"].reason, "transfer");
+});
+
+test("failed currency transfer persistence restores both balances and history", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "slivki-transfer-rollback-"));
+  const file = path.join(directory, "currency.json");
+  const sender = { id: 10, first_name: "Sender" };
+  const receiver = { id: 20, first_name: "Receiver" };
+  const store = new CurrencyStore(file, { startingBalance: 100 });
+  store.ensureUser(sender);
+  store.ensureUser(receiver);
+  store.saveData = () => false;
+  assert.throws(() => store.transferOnce(sender, receiver, {
+    operationId: "pay:rollback",
+    idempotencyKey: "pay:rollback",
+    correlationId: "pay:rollback",
+    amount: 25
+  }), /Currency storage write failed/);
+  assert.equal(store.users["10"].balance, 100);
+  assert.equal(store.users["20"].balance, 100);
+  assert.equal(store.operations["pay:rollback"], undefined);
+});
