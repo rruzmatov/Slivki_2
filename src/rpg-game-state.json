@@ -1,0 +1,98 @@
+{
+  "players": {},
+  "families": {},
+  "marriageProposals": {},
+  "ledger": [],
+  "logs": [],
+  "shop": {
+    "version": "1.0.0",
+    "checkoutSessions": {},
+    "orders": {},
+    "idempotencyKeys": {},
+    "listingRuntime": {}
+  },
+  "unlocks": {
+    "records": {},
+    "reconciledOwners": {}
+  },
+  "inventory": {
+    "version": "1.0.0",
+    "entries": {},
+    "reservations": {},
+    "equipment": {},
+    "leases": {},
+    "operations": {},
+    "idempotencyKeys": {},
+    "history": [],
+    "outbox": {},
+    "actionSessions": {}
+  },
+  "ownership": {
+    "version": "1.0.0",
+    "owners": {},
+    "records": {},
+    "entryIdsByOwner": {},
+    "permissions": {},
+    "ownerAccess": {},
+    "history": [],
+    "outbox": {}
+  },
+  "runtime": {
+    "version": "1.0.0",
+    "history": [],
+    "outbox": {},
+    "inbox": {},
+    "idempotency": {},
+    "schedulerTasks": {
+      "task_86b0899a-9d52-4a06-89d2-6dc4a4dc292c": {
+        "id": "task_86b0899a-9d52-4a06-89d2-6dc4a4dc292c",
+        "taskType": "runtime.outbox.dispatch",
+        "payloadSchemaId": "runtime.outbox.dispatch",
+        "payloadSchemaVersion": 1,
+        "payload": {},
+        "status": "pending",
+        "runAt": "2026-08-02T14:21:58.879Z",
+        "attempts": 0,
+        "maxAttempts": 10,
+        "idempotencyKey": "runtime.outbox.dispatch:bootstrap",
+        "correlationId": "runtime:bootstrap",
+        "causationId": "runtime:bootstrap",
+        "createdBy": {
+          "kind": "service",
+          "id": "composition-root"
+        },
+        "createdAt": "2026-08-02T14:21:58.891Z",
+        "updatedAt": "2026-08-02T14:21:58.891Z"
+      },
+      "task_6904992c-02c3-42d5-8860-9854efd2d29d": {
+        "id": "task_6904992c-02c3-42d5-8860-9854efd2d29d",
+        "taskType": "runtime.retention.run",
+        "payloadSchemaId": "runtime.retention.run",
+        "payloadSchemaVersion": 1,
+        "payload": {},
+        "status": "pending",
+        "runAt": "2026-08-02T14:21:58.879Z",
+        "attempts": 0,
+        "maxAttempts": 10,
+        "idempotencyKey": "runtime.retention.run:bootstrap",
+        "correlationId": "runtime:bootstrap",
+        "causationId": "runtime:bootstrap",
+        "createdBy": {
+          "kind": "service",
+          "id": "composition-root"
+        },
+        "createdAt": "2026-08-02T14:21:58.893Z",
+        "updatedAt": "2026-08-02T14:21:58.893Z"
+      }
+    }
+  },
+  "stats": {
+    "commandsHandled": 0,
+    "purchases": 0,
+    "marriages": 0,
+    "jobsCompleted": 0,
+    "travels": 0,
+    "dailyRewards": 0,
+    "adminActions": 0
+  }
+}

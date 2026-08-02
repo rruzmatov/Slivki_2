@@ -6,19 +6,27 @@
   "scripts": {
     "start": "node src/bot.js",
     "start:iris": "node src/iris-bot.js",
-    "build": "tsc --noEmit"
+    "start:rpg": "npm run compile && node dist/rpg-bot.js",
+    "build": "tsc --noEmit",
+    "lint": "biome lint src/rpg src/rpg-bot.ts",
+    "compile": "tsc",
+    "test:rpg": "npm run compile && node --test dist/rpg/tests/*.test.js src/tests/*.test.js",
+    "test:architecture": "npm run compile && node --test dist/rpg/tests/architecture.test.js",
+    "test:transport": "npm run compile && node --test dist/rpg/tests/transport-*.test.js",
+    "test:stability": "node --test src/tests/*.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.10.0",
     "dotenv": "^17.4.2",
     "nanoid": "^6.0.0",
-    "node-telegram-bot-api": "^0.67.0",
+    "node-telegram-bot-api": "^1.2.0",
     "openai": "^6.39.1",
     "sqlite3": "^6.0.1",
     "telegraf": "^4.16.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.6",
     "@types/node": "^26.1.1",
     "typescript": "^7.0.2"
   }

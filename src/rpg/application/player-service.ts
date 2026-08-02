@@ -1,5 +1,6 @@
 import type { PlayerProfile, TelegramUserId } from "../domain/types";
 import { GAME_BALANCE, xpForLevel } from "../config/game-balance";
+import type { PlayerRepository } from "./ports/game-repositories";
 
 export interface TelegramIdentity {
   id: TelegramUserId;
@@ -8,13 +9,16 @@ export interface TelegramIdentity {
 }
 
 export class PlayerService {
-  ensurePlayer(players: Record<string, PlayerProfile>, identity: TelegramIdentity, now: string): PlayerProfile {
-    const existing = players[String(identity.id)];
+  constructor(private readonly repository: PlayerRepository) {}
+
+  async ensurePlayer(identity: TelegramIdentity, now: string): Promise<PlayerProfile> {
+    const existing = await this.repository.findById(identity.id);
 
     if (existing) {
       existing.username = identity.username;
       existing.firstName = identity.firstName;
       existing.updatedAt = now;
+      await this.repository.save(existing);
       return existing;
     }
 
@@ -23,6 +27,8 @@ export class PlayerService {
       username: identity.username,
       firstName: identity.firstName,
       balance: GAME_BALANCE.player.startingBalance,
+      bankBalance: 0,
+      country: "Uzbekistan",
       level: 1,
       xp: 0,
       energy: GAME_BALANCE.player.startingEnergy,
@@ -31,6 +37,7 @@ export class PlayerService {
       skills: {},
       transportIds: [],
       homeIds: [],
+      businessIds: [],
       petIds: [],
       settings: {
         blocked: false,
@@ -41,11 +48,11 @@ export class PlayerService {
       updatedAt: now
     };
 
-    players[String(identity.id)] = created;
+    await this.repository.save(created);
     return created;
   }
 
-  addXp(player: PlayerProfile, xp: number, now: string): void {
+  async addXp(player: PlayerProfile, xp: number, now: string): Promise<void> {
     player.xp += Math.max(0, Math.floor(xp));
 
     while (player.xp >= xpForLevel(player.level)) {
@@ -55,5 +62,6 @@ export class PlayerService {
     }
 
     player.updatedAt = now;
+    await this.repository.save(player);
   }
 }

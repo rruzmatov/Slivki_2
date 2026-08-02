@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { backupCorruptJson } = require("./json-file-safety");
 
 const FAMILY_LOVE_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const FAMILY_LOVE_GAIN = 10;
@@ -51,6 +52,7 @@ function readJsonFile(filePath, fallback) {
     return data && typeof data === "object" && !Array.isArray(data) ? data : fallback;
   } catch (error) {
     console.error(`Family system read error (${path.basename(filePath)}):`, error?.message || error);
+    backupCorruptJson(filePath);
     return fallback;
   }
 }
@@ -260,7 +262,6 @@ function doWork(userId, context = {}) {
       ok: false,
       reason: "no_marriage",
       message: "нужен брак, чтобы работать"
-      // TODO: В будущей экономике можно добавить личный кошелёк без брака.
     };
   }
 
@@ -289,8 +290,14 @@ function doWork(userId, context = {}) {
     };
   }
 
-  if (profession.requiresItem) {
-    // TODO Фаза 3: проверить имущество семьи в inventory.json по profession.requiresItem.
+  if (profession.requiresItem && !hasRequiredItem(context, profession.requiresItem)) {
+    return {
+      ok: false,
+      reason: "item_required",
+      requiredItem: profession.requiresItem,
+      requiredItemName: getRequiredItemName(profession.requiresItem),
+      career
+    };
   }
 
   const families = loadFamilies();
@@ -329,19 +336,25 @@ function getRequiredItemName(itemKey) {
   return REQUIRED_ITEM_NAMES[itemKey] || itemKey || "";
 }
 
-function getAvailableProfessions(userId) {
+function hasRequiredItem(context, itemKey) {
+  if (!itemKey) return true;
+  if (typeof context?.hasItem === "function") return context.hasItem(itemKey) === true;
+  return Array.isArray(context?.ownedItems) && context.ownedItems.includes(itemKey);
+}
+
+function getAvailableProfessions(userId, context = {}) {
   const career = getCareer(userId);
 
   return Object.entries(PROFESSIONS).map(([key, profession]) => {
     const levelUnlocked = career.level >= profession.requiredLevel;
+    const itemUnlocked = hasRequiredItem(context, profession.requiresItem);
 
     return {
       key,
       ...profession,
-      unlocked: levelUnlocked,
+      unlocked: levelUnlocked && itemUnlocked,
       levelUnlocked,
-      // TODO Фаза 3: добавить реальную проверку имущества семьи для requiresItem.
-      itemUnlocked: true,
+      itemUnlocked,
       current: key === career.profession
     };
   });
@@ -360,7 +373,7 @@ function findProfessionKey(value) {
   return found ? found[0] : "";
 }
 
-function switchProfession(userId, professionKey) {
+function switchProfession(userId, professionKey, context = {}) {
   const key = findProfessionKey(professionKey);
 
   if (!key || !PROFESSIONS[key]) {
@@ -386,8 +399,16 @@ function switchProfession(userId, professionKey) {
     };
   }
 
-  if (profession.requiresItem) {
-    // TODO Фаза 3: проверить наличие нужного имущества семьи перед сменой профессии.
+  if (profession.requiresItem && !hasRequiredItem(context, profession.requiresItem)) {
+    return {
+      ok: false,
+      reason: "item_required",
+      requiredItem: profession.requiresItem,
+      requiredItemName: getRequiredItemName(profession.requiresItem),
+      career,
+      professionKey: key,
+      professionName: profession.name
+    };
   }
 
   career.profession = key;
@@ -432,5 +453,6 @@ module.exports = {
   findProfessionKey,
   getProfessionName,
   getRequiredItemName,
+  hasRequiredItem,
   formatRemainingTime
 };

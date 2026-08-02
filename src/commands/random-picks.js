@@ -402,7 +402,7 @@ class RandomPicksService {
         await this.bot.sendMessage(
           chatId,
           `🔍 Пока не знаю участников этого чата для команды «${labelKey}». Пусть люди напишут пару сообщений.`,
-          { reply_to_message_id: msg.message_id }
+          { reply_parameters: { message_id: msg.message_id } }
         ).catch(() => {});
         return;
       }
@@ -413,7 +413,7 @@ class RandomPicksService {
         await this.bot.sendMessage(
           chatId,
           `🔍 Не удалось выбрать участника для «${labelKey}», попробуй ещё раз чуть позже.`,
-          { reply_to_message_id: msg.message_id }
+          { reply_parameters: { message_id: msg.message_id } }
         ).catch(() => {});
         return;
       }
@@ -423,7 +423,7 @@ class RandomPicksService {
       const sent = await this.bot.sendMessage(
         chatId,
         buildProgressFrame(source, source.frames[0], 15),
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
 
       const percents = [40, 70, 100];
@@ -459,7 +459,7 @@ class RandomPicksService {
         if (!this.getErrorMessage(error).includes("message is not modified")) {
           console.error("RandomPicks final edit error:", this.getErrorMessage(error));
           // Если отредактировать не вышло — хотя бы отправим результат отдельным сообщением.
-          await this.bot.sendMessage(chatId, resultText, { reply_to_message_id: msg.message_id }).catch(() => {});
+          await this.bot.sendMessage(chatId, resultText, { reply_parameters: { message_id: msg.message_id } }).catch(() => {});
         }
       }
     } catch (error) {
@@ -468,7 +468,7 @@ class RandomPicksService {
       await this.bot.sendMessage(
         chatId,
         "⚠️ Что-то пошло не так, попробуй ещё раз чуть позже.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       ).catch(() => {});
     }
   }

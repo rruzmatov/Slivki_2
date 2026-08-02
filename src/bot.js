@@ -1,15 +1,43 @@
 require("dotenv").config();
 
-const TelegramBot = require("node-telegram-bot-api");
+const { TelegramBot } = require("node-telegram-bot-api");
 const fs = require("fs");
 const path = require("path");
+const { randomBytes } = require("node:crypto");
 const familySystem = require("./family-system");
 const loveQuotes = require("./love-quotes");
 const { NukeService } = require("./nuke-service");
 const EmergencyNukeService = require("./emergency-nuke-service");
 const { CurrencyStore } = require("./currency");
 const { parseBet, playDice, playCasino } = require("./betting-games");
-const { QuizManager, QUIZ_REWARD } = require("./quiz");
+const { CATEGORY_LABELS, DIFFICULTY_LABELS, QuizManager, QUIZ_REWARD } = require("./quiz");
+const { formatMarriageDetails } = require("./marriage-time");
+const { RpPresentationSelector, buildRpText } = require("./rp-presentation");
+const { TagCallController } = require("./tag-call-controller");
+const { DeferredJsonWriter } = require("./deferred-json-writer");
+const { backupCorruptJson } = require("./json-file-safety");
+const { BugReportStore } = require("./bug-report-store");
+const {
+  check: diagnosticCheck,
+  formatDiagnostics,
+  inspectJsonFiles,
+  inspectPremiumEmoji,
+  inspectRpgArchitecture,
+  inspectRpgRuntime,
+  inspectStorage
+} = require("./diagnostics");
+const {
+  ADMIN_DEMOTION_RIGHTS,
+  ADMIN_PROMOTION_RIGHTS,
+  describeMemberRestrictions,
+  getFullPermissions,
+  getMutedPermissions,
+  isDemotionApplied,
+  isMemberMuted,
+  isMuteApplied,
+  isMuteLifted,
+  isPromotionApplied
+} = require("./telegram-moderation");
 
 const botToken = process.env.BOT_TOKEN;
 
@@ -34,11 +62,22 @@ if (!botToken) {
   process.exit(1);
 }
 
+const MAX_RUNTIME_ERRORS = 200;
+const MAX_CALLBACK_CACHE = 10000;
+const MAX_SUPPORT_SESSIONS = 5000;
+const MAX_PENDING_MARRIAGES = 10000;
+const CALLBACK_RETENTION_MS = 10 * 60 * 1000;
+const runtimeErrors = [];
+const processedCallbackQueries = new Map();
+let callbackHandlerCount = 0;
+
 process.on("uncaughtException", (err) => {
+  recordRuntimeError("uncaughtException", err);
   console.error("UNCAUGHT EXCEPTION:", err);
 });
 
 process.on("unhandledRejection", (err) => {
+  recordRuntimeError("unhandledRejection", err);
   console.error("UNHANDLED REJECTION:", err);
 });
 
@@ -51,6 +90,60 @@ process.on("SIGINT", () => {
 });
 
 const bot = new TelegramBot(botToken, { polling: true });
+const originalOn = bot.on.bind(bot);
+
+bot.on = (eventName, callback) => {
+  if (eventName !== "callback_query") {
+    return originalOn(eventName, async (...args) => {
+      try {
+        return await callback(...args);
+      } catch (error) {
+        const update = args[0];
+        const correlationId = recordRuntimeError(`telegram.${eventName}`, error, {
+          chatId: update?.chat?.id,
+          messageId: update?.message_id,
+          userId: update?.from?.id
+        });
+        console.error(`Telegram event error ${eventName} (${correlationId}):`, getErrorMessage(error));
+        return null;
+      }
+    });
+  }
+  callbackHandlerCount += 1;
+  return originalOn(eventName, async (query, ...args) => {
+    const now = Date.now();
+    for (const [queryId, completedAt] of processedCallbackQueries) {
+      if (completedAt < now - CALLBACK_RETENTION_MS) processedCallbackQueries.delete(queryId);
+    }
+    if (query?.id && processedCallbackQueries.has(query.id)) {
+      await bot.answerCallbackQuery(query.id, { text: "Этот запрос уже обработан." }).catch(() => { });
+      return null;
+    }
+    if (query?.id) processedCallbackQueries.set(query.id, now);
+    while (processedCallbackQueries.size > MAX_CALLBACK_CACHE) {
+      processedCallbackQueries.delete(processedCallbackQueries.keys().next().value);
+    }
+    try {
+      return await callback(query, ...args);
+    } catch (error) {
+      if (query?.id) processedCallbackQueries.delete(query.id);
+      const correlationId = recordRuntimeError("callback_query", error, {
+        callbackData: query?.data,
+        chatId: query?.message?.chat?.id,
+        messageId: query?.message?.message_id,
+        userId: query?.from?.id
+      });
+      console.error(`Callback error (${correlationId}):`, getErrorMessage(error));
+      if (query?.id) {
+        await bot.answerCallbackQuery(query.id, {
+          text: `Ошибка обработки. Код: ${correlationId}`.slice(0, 180),
+          show_alert: true
+        }).catch(() => { });
+      }
+      return null;
+    }
+  });
+};
 
 const UNKNOWN_COMMAND_TEXT = "❓ Такой команды нет. Напиши /commands, чтобы увидеть список всех команд.";
 const HANDLER_ERROR_TEXT = "⚠️ Что-то пошло не так. Попробуй ещё раз чуть позже.";
@@ -61,15 +154,8 @@ const manualSlashCommandRegexes = [
 ];
 const originalOnText = bot.onText.bind(bot);
 
-process.on("unhandledRejection", (reason) => {
-  console.error("Unhandled Rejection:", getErrorMessage(reason));
-});
-
-process.on("uncaughtException", (error) => {
-  console.error("Uncaught Exception:", getErrorMessage(error));
-});
-
 bot.on("polling_error", (error) => {
+  recordRuntimeError("polling_error", error);
   console.error("Polling error:", getErrorMessage(error));
 });
 
@@ -97,7 +183,7 @@ async function replyHandlerError(msg) {
   await bot.sendMessage(
     msg.chat.id,
     HANDLER_ERROR_TEXT,
-    { reply_to_message_id: msg.message_id }
+    { reply_parameters: { message_id: msg.message_id } }
   ).catch(() => { });
 }
 
@@ -144,7 +230,10 @@ bot.onText = (regexp, callback) => {
     try {
       return await callback(...args);
     } catch (error) {
-      console.error(`Ошибка в обработчике ${regexp}:`, getErrorMessage(error));
+      const correlationId = recordRuntimeError("onText", error, {
+        commandPattern: String(regexp), chatId: msg?.chat?.id, messageId: msg?.message_id, userId: msg?.from?.id
+      });
+      console.error(`Ошибка в обработчике ${regexp} (${correlationId}):`, getErrorMessage(error));
       await replyHandlerError(msg);
       return null;
     }
@@ -734,17 +823,22 @@ console.log("🍦 Сливки Бот запущен");
 const users = new Map();
 const chatUsers = new Map();
 const muteTimers = new Map();
+const activeMutes = new Map();
+const quizTimers = new Map();
+const tagCallController = new TagCallController(1200);
 let adminLogs = new Map();
 let botId = null;
 
 const pendingMarriages = new Map();
-const supportUsers = new Set();
+const rpPresentationSelector = new RpPresentationSelector();
+const supportUsers = new Map();
 const MARRIAGE_PROPOSAL_SEPARATOR = "━".repeat(15);
 
 const chatRules = new Map();
 const waitingRulesInput = new Set();
 const autoKickSettings = new Map();
 const userLeftHistory = new Map();
+let userLeftEventCount = 0;
 const joinLeaveSettings = new Map();
 const slowModeSettings = new Map();
 const slowModeLastMessages = new Map();
@@ -759,11 +853,16 @@ const COMMAND_SETTINGS_FILE = path.join(__dirname, "command-settings.json");
 const ADMIN_LOGS_FILE = path.join(__dirname, "admin-logs.json");
 const CHAT_SETTINGS_FILE = path.join(__dirname, "chat-settings.json");
 const CURRENCY_FILE = path.join(__dirname, "currency-users.json");
+const QUIZ_STATE_FILE = path.join(__dirname, "quiz-state.json");
+const BUG_REPORTS_FILE = path.join(__dirname, "bug-reports.json");
+const RPG_STATE_FILE = path.join(__dirname, "rpg-game-state.json");
 
 const MAX_TELEGRAM_MESSAGE_LENGTH = 4096;
 const MAX_SAFE_REPLY_LENGTH = 3900;
 const MAX_MUTE_SECONDS = 365 * 24 * 60 * 60;
 const MAX_NODE_TIMER_MS = 2147483647;
+const MUTE_VERIFY_DELAY_MS = 350;
+const MUTE_RETRY_DELAY_MS = 60 * 1000;
 
 const DEFAULT_JOIN_LEAVE_SETTINGS = {
   joins: true,
@@ -777,7 +876,8 @@ const marriages = loadMarriages();
 const marriageQuotesState = loadMarriageQuotesState();
 const savedUsers = loadUsers();
 const currencyStore = new CurrencyStore(CURRENCY_FILE, { startingBalance: 100 });
-const quizManager = new QuizManager();
+const quizManager = new QuizManager(QUIZ_STATE_FILE);
+const bugReportStore = new BugReportStore(BUG_REPORTS_FILE);
 adminLogs = loadAdminLogs();
 const savedChatSettings = loadChatSettings();
 
@@ -805,6 +905,10 @@ for (const [chatId, settings] of savedChatSettings.joinLeaveSettings) {
 
 for (const [chatId, settings] of savedChatSettings.slowModeSettings) {
   slowModeSettings.set(chatId, settings);
+}
+
+for (const [key, mute] of savedChatSettings.activeMutes) {
+  activeMutes.set(key, mute);
 }
 
 bot.on("message", async (msg) => {
@@ -876,8 +980,29 @@ function getErrorMessage(error) {
   );
 }
 
+function recordRuntimeError(source, error, context = {}) {
+  const correlationId = `err-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
+  runtimeErrors.push({
+    correlationId,
+    source,
+    message: getErrorMessage(error),
+    stack: typeof error?.stack === "string" ? error.stack.slice(0, 4000) : undefined,
+    context,
+    occurredAt: new Date().toISOString()
+  });
+  if (runtimeErrors.length > MAX_RUNTIME_ERRORS) runtimeErrors.splice(0, runtimeErrors.length - MAX_RUNTIME_ERRORS);
+  return correlationId;
+}
+
 function writeJsonFile(filePath, data, label) {
   try {
+    if (fs.existsSync(filePath)) {
+      try {
+        JSON.parse(fs.readFileSync(filePath, "utf8"));
+      } catch {
+        backupCorruptJson(filePath);
+      }
+    }
     const tmpFile = `${filePath}.tmp`;
     fs.writeFileSync(tmpFile, JSON.stringify(data, null, 2), "utf8");
     fs.renameSync(tmpFile, filePath);
@@ -887,6 +1012,8 @@ function writeJsonFile(filePath, data, label) {
     return false;
   }
 }
+
+const deferredJsonWriter = new DeferredJsonWriter(writeJsonFile, { delayMs: 750, retryMs: 5000 });
 
 function truncateTelegramText(text) {
   const value = String(text);
@@ -957,6 +1084,23 @@ function normalizeSlowModeSetting(setting) {
   };
 }
 
+function normalizeActiveMute(setting, key) {
+  if (!setting || typeof setting !== "object") return null;
+  const [keyChatId, keyUserId] = String(key).split(":").map(Number);
+  const chatId = Number(setting.chatId ?? keyChatId);
+  const userId = Number(setting.userId ?? keyUserId);
+  const expiresAt = String(setting.expiresAt || "");
+  if (!Number.isSafeInteger(chatId) || !Number.isSafeInteger(userId) || !Number.isFinite(Date.parse(expiresAt))) return null;
+  return {
+    chatId,
+    userId,
+    expiresAt,
+    displayName: String(setting.displayName || `ID:${userId}`),
+    mutedBy: Number.isSafeInteger(Number(setting.mutedBy)) ? Number(setting.mutedBy) : null,
+    createdAt: Number.isFinite(Date.parse(setting.createdAt)) ? String(setting.createdAt) : new Date().toISOString()
+  };
+}
+
 function loadChatSettings() {
   try {
     if (!fs.existsSync(CHAT_SETTINGS_FILE)) {
@@ -964,7 +1108,8 @@ function loadChatSettings() {
         rules: new Map(),
         autoKickSettings: new Map(),
         joinLeaveSettings: new Map(),
-        slowModeSettings: new Map()
+        slowModeSettings: new Map(),
+        activeMutes: new Map()
       };
     }
 
@@ -973,6 +1118,7 @@ function loadChatSettings() {
     const loadedAutoKickSettings = new Map();
     const loadedJoinLeaveSettings = new Map();
     const loadedSlowModeSettings = new Map();
+    const loadedActiveMutes = new Map();
 
     if (data?.rules && typeof data.rules === "object" && !Array.isArray(data.rules)) {
       for (const [chatId, text] of Object.entries(data.rules)) {
@@ -1016,11 +1162,19 @@ function loadChatSettings() {
       }
     }
 
+    if (data?.activeMutes && typeof data.activeMutes === "object" && !Array.isArray(data.activeMutes)) {
+      for (const [key, setting] of Object.entries(data.activeMutes)) {
+        const normalized = normalizeActiveMute(setting, key);
+        if (normalized) loadedActiveMutes.set(`${normalized.chatId}:${normalized.userId}`, normalized);
+      }
+    }
+
     return {
       rules,
       autoKickSettings: loadedAutoKickSettings,
       joinLeaveSettings: loadedJoinLeaveSettings,
-      slowModeSettings: loadedSlowModeSettings
+      slowModeSettings: loadedSlowModeSettings,
+      activeMutes: loadedActiveMutes
     };
   } catch (error) {
     console.error("Load chat settings error:", getErrorMessage(error));
@@ -1028,7 +1182,8 @@ function loadChatSettings() {
       rules: new Map(),
       autoKickSettings: new Map(),
       joinLeaveSettings: new Map(),
-      slowModeSettings: new Map()
+      slowModeSettings: new Map(),
+      activeMutes: new Map()
     };
   }
 }
@@ -1040,7 +1195,8 @@ function saveChatSettings() {
       rules: Object.fromEntries(chatRules),
       autoKickSettings: Object.fromEntries(autoKickSettings),
       joinLeaveSettings: Object.fromEntries(joinLeaveSettings),
-      slowModeSettings: Object.fromEntries(slowModeSettings)
+      slowModeSettings: Object.fromEntries(slowModeSettings),
+      activeMutes: Object.fromEntries(activeMutes)
     },
     "Save chat settings"
   );
@@ -1070,7 +1226,7 @@ function loadUsers() {
 }
 
 function saveUsers() {
-  writeJsonFile(USERS_FILE, Object.fromEntries(users), "Save users");
+  deferredJsonWriter.schedule(USERS_FILE, () => Object.fromEntries(users), "Save users");
 }
 
 function loadAdminLogs() {
@@ -1151,7 +1307,7 @@ function loadStats() {
 }
 
 function saveStats() {
-  writeJsonFile(STATS_FILE, stats, "Save stats");
+  deferredJsonWriter.schedule(STATS_FILE, () => stats, "Save stats");
 }
 
 function loadChatInfo() {
@@ -1178,7 +1334,7 @@ function loadChatInfo() {
 }
 
 function saveChatInfo() {
-  writeJsonFile(CHATS_FILE, Object.fromEntries(chatInfo), "Save chats");
+  deferredJsonWriter.schedule(CHATS_FILE, () => Object.fromEntries(chatInfo), "Save chats");
 }
 
 function loadMarriages() {
@@ -1399,17 +1555,21 @@ function removeMarriage(chatId, userId) {
 }
 
 function createMarriageProposal(chatId, firstUserId, secondUserId) {
-  const proposalId = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
+  const now = Date.now();
+  for (const [id, proposal] of pendingMarriages) {
+    if (proposal.expiresAt <= now) pendingMarriages.delete(id);
+  }
+  while (pendingMarriages.size >= MAX_PENDING_MARRIAGES) {
+    pendingMarriages.delete(pendingMarriages.keys().next().value);
+  }
+  const proposalId = `${now}-${randomBytes(6).toString("hex")}`;
 
   pendingMarriages.set(proposalId, {
     chatId,
     firstUserId,
-    secondUserId
+    secondUserId,
+    expiresAt: now + 10 * 60 * 1000
   });
-
-  setTimeout(() => {
-    pendingMarriages.delete(proposalId);
-  }, 10 * 60 * 1000);
 
   return proposalId;
 }
@@ -1578,8 +1738,17 @@ async function sendRpActionMessage(msg, command, commandData) {
   const userName = getTelegramName(msg.from);
   const targetName = getTelegramName(msg.reply_to_message.from);
   const emoji = commandData.emoji || "🎲";
-  const text = `${emoji} | ${userName} ${commandData.actionText} ${targetName}`;
-  const customEmojiId = commandData.customEmojiId || "";
+  const selectionKey = `${msg.chat.id}:${msg.from.id}:${msg.reply_to_message.from.id}:${command}`;
+  const actionText = buildRpText(rpPresentationSelector, selectionKey, userName, commandData.actionText, targetName);
+  const text = `${emoji} | ${actionText}`;
+  const normalizedCommand = command.replace(/\s+/g, "");
+  const customEmojiId = rpPresentationSelector.choose([
+    commandData.customEmojiId,
+    RP_COMMAND_PREMIUM_EMOJI[command],
+    RP_COMMAND_PREMIUM_EMOJI[normalizedCommand],
+    RP_PREMIUM_EMOJI[emoji],
+    savedPremiumEmojiIds.rp?.[emoji]
+  ], `${selectionKey}:emoji`);
 
   console.log("RP:", command, customEmojiId);
 
@@ -1594,7 +1763,7 @@ async function sendRpActionMessage(msg, command, commandData) {
             custom_emoji_id: customEmojiId
           }
         ],
-        reply_to_message_id: msg.message_id
+        reply_parameters: { message_id: msg.message_id }
       });
       return;
     } catch (error) {
@@ -1603,7 +1772,7 @@ async function sendRpActionMessage(msg, command, commandData) {
   }
 
   await bot.sendMessage(msg.chat.id, text, {
-    reply_to_message_id: msg.message_id
+    reply_parameters: { message_id: msg.message_id }
   });
 }
 
@@ -1616,6 +1785,7 @@ const DEFAULT_COMMAND_SETTINGS = [
   ["dice", true],
   ["casino", true],
   ["quiz", true],
+  ["quizstats", true],
   ["profile", true],
   ["top", true],
   ["admins", true],
@@ -1633,6 +1803,8 @@ const DEFAULT_COMMAND_SETTINGS = [
   ["kick", true],
   ["action", true],
   ["tagall", true],
+  ["diagnostics", true],
+  ["reportbug", true],
   ["ban", true],
   ["unban", true],
   ["clear", true],
@@ -1658,6 +1830,20 @@ const DEFAULT_COMMAND_SETTINGS = [
 ];
 
 const commandSettings = loadCommandSettings();
+
+const HIDDEN_RPG_UI_SETTINGS = new Set([
+  "balance",
+  "profile",
+  "brak",
+  "razvod",
+  "partner",
+  "career",
+  "action"
+]);
+
+function isCommandVisibleInUserInterface(commandName) {
+  return isCommandEnabled(commandName) && !HIDDEN_RPG_UI_SETTINGS.has(commandName);
+}
 
 const groupCommands = [
   { command: "start", description: "🍦 запуск бота" },
@@ -1701,7 +1887,13 @@ const groupCommands = [
   { command: "brak", description: "💍 Брак" },
   { command: "razvod", description: "💔 Развод" },
   { command: "partner", description: "💞 Вторая половинка" },
-  { command: "tagall", description: "📢 позвать всех участников" }
+  { command: "tagall", description: "📢 позвать всех участников" },
+  { command: "tagpause", description: "⏸ приостановить вызов" },
+  { command: "tagresume", description: "▶️ продолжить вызов" },
+  { command: "tagstop", description: "⏹ остановить вызов" },
+  { command: "quizstats", description: "🏆 статистика викторины" },
+  { command: "diagnostics", description: "🩺 диагностика бота" },
+  { command: "reportbug", description: "🐞 сообщить об ошибке" }
 ];
 
 let botUsername = "";
@@ -1719,7 +1911,7 @@ async function setupBotCommands() {
     const privateCommands = [
       { command: "start", description: "🍦 добавить бота в группу" }
     ];
-    const enabledGroupCommands = groupCommands.filter(({ command }) => isCommandEnabled(command));
+    const enabledGroupCommands = groupCommands.filter(({ command }) => isCommandVisibleInUserInterface(command));
 
     await bot.deleteMyCommands();
     await bot.deleteMyCommands({ scope: { type: "all_group_chats" } });
@@ -1874,30 +2066,6 @@ function getMarriageDisplayName(user) {
   return fullName || (user.id ? `ID:${user.id}` : "Пользователь");
 }
 
-function formatMarriageDuration(marriedAt) {
-  if (!marriedAt) return "дата неизвестна";
-
-  const startTime = new Date(marriedAt).getTime();
-
-  if (!Number.isFinite(startTime)) return "дата неизвестна";
-
-  const elapsedDays = Math.max(0, Math.floor((Date.now() - startTime) / (24 * 60 * 60 * 1000)));
-
-  if (elapsedDays >= 365) {
-    const years = Math.floor(elapsedDays / 365);
-    const months = Math.floor((elapsedDays % 365) / 30);
-    return `${years} ${getRussianPlural(years, "год", "года", "лет")} ${months} ${getRussianPlural(months, "месяц", "месяца", "месяцев")}`;
-  }
-
-  if (elapsedDays > 30) {
-    const months = Math.floor(elapsedDays / 30);
-    const days = elapsedDays % 30;
-    return `${months} ${getRussianPlural(months, "месяц", "месяца", "месяцев")} ${days} ${getRussianPlural(days, "день", "дня", "дней")}`;
-  }
-
-  return `${elapsedDays} ${getRussianPlural(elapsedDays, "день", "дня", "дней")}`;
-}
-
 function getRussianPlural(value, one, few, many) {
   const absValue = Math.abs(Number(value));
   const lastTwo = absValue % 100;
@@ -2038,6 +2206,11 @@ async function enforceSlowMode(msg) {
   }
 
   const chatLastMessages = slowModeLastMessages.get(chatId);
+  if (chatLastMessages.size > 1000) {
+    for (const [knownUserId, lastSeenAt] of chatLastMessages) {
+      if (now - lastSeenAt > setting.seconds * 1000) chatLastMessages.delete(knownUserId);
+    }
+  }
   const lastMessageAt = chatLastMessages.get(userId) || 0;
   const elapsedSeconds = Math.floor((now - lastMessageAt) / 1000);
 
@@ -2048,7 +2221,7 @@ async function enforceSlowMode(msg) {
     await sendMessageSafe(
       msg.chat.id,
       `⏳ Подождите ещё ${remainingSeconds} секунд.`,
-      { reply_to_message_id: msg.message_id },
+      { reply_parameters: { message_id: msg.message_id } },
       "slowmodeNotice"
     );
     return true;
@@ -2756,6 +2929,134 @@ async function ensureModeratableTarget(msg, targetProfile, actionText) {
   return null;
 }
 
+async function getBotMemberWithPermission(chatId, permission) {
+  const me = await getBotIdentity();
+  const member = await bot.getChatMember(chatId, me.id);
+  if (!hasBotAdminPermission(member, permission)) {
+    throw new Error(`У бота нет права ${permission}; status=${member.status}`);
+  }
+  return member;
+}
+
+async function changeTelegramAdminVerified(chatId, targetUserId, promote, title = "") {
+  await getBotMemberWithPermission(chatId, "can_promote_members");
+  const before = await bot.getChatMember(chatId, targetUserId);
+  if (before.status === "creator") {
+    throw new Error("Владелец чата имеет неизменяемый статус creator");
+  }
+  if (before.user?.is_bot && Number(before.user.id) === Number(botId)) {
+    throw new Error("Бот не может изменять собственные права администратора");
+  }
+  if (promote && before.status === "administrator" && isPromotionApplied(before)) {
+    return { changed: false, reason: "Пользователь уже является администратором с запрошенными правами", member: before };
+  }
+  if (!promote && before.status !== "administrator") {
+    return { changed: false, reason: "У пользователя нет активного статуса администратора", member: before };
+  }
+  if (before.status === "administrator" && before.can_be_edited !== true) {
+    throw new Error("Telegram пометил администратора как can_be_edited=false; бот не может изменить его права");
+  }
+
+  const apiResult = await bot.promoteChatMember(
+    chatId,
+    targetUserId,
+    promote ? ADMIN_PROMOTION_RIGHTS : ADMIN_DEMOTION_RIGHTS
+  );
+  if (apiResult !== true) throw createTelegramResultError("promoteChatMember", apiResult);
+  await sleep(MUTE_VERIFY_DELAY_MS);
+  let after = await bot.getChatMember(chatId, targetUserId);
+  const applied = promote ? isPromotionApplied(after) : isDemotionApplied(after);
+  if (!applied) {
+    throw createTelegramResultError("promoteChatMember verification", {
+      requested: promote ? "administrator" : "member",
+      actualStatus: after.status,
+      canBeEdited: after.can_be_edited
+    });
+  }
+
+  let titleWarning = "";
+  if (promote && title) {
+    try {
+      const titleResult = await bot.setChatAdministratorCustomTitle(chatId, targetUserId, title.slice(0, 16));
+      if (titleResult !== true) throw createTelegramResultError("setChatAdministratorCustomTitle", titleResult);
+      await sleep(MUTE_VERIFY_DELAY_MS);
+      after = await bot.getChatMember(chatId, targetUserId);
+      if (after.custom_title !== title.slice(0, 16)) {
+        throw createTelegramResultError("custom title verification", { actualTitle: after.custom_title || null });
+      }
+    } catch (error) {
+      titleWarning = `Администратор назначен, но должность не установлена: ${getTelegramFailureReason(error)}`;
+    }
+  }
+  return { changed: true, member: after, titleWarning };
+}
+
+async function applyMuteVerified(chatId, userId, untilDate) {
+  const result = await bot.restrictChatMember(chatId, userId, getMutedPermissions(), {
+    until_date: untilDate,
+    use_independent_chat_permissions: true
+  });
+  if (result !== true) throw createTelegramResultError("restrictChatMember", result);
+  await sleep(MUTE_VERIFY_DELAY_MS);
+  const member = await bot.getChatMember(chatId, userId);
+  if (!isMuteApplied(member)) {
+    throw createTelegramResultError("mute verification", describeMemberRestrictions(member));
+  }
+  return member;
+}
+
+async function liftMuteVerified(chatId, userId) {
+  const result = await bot.restrictChatMember(chatId, userId, getFullPermissions(), {
+    use_independent_chat_permissions: true
+  });
+  if (result !== true) throw createTelegramResultError("restrictChatMember", result);
+  await sleep(MUTE_VERIFY_DELAY_MS);
+  const member = await bot.getChatMember(chatId, userId);
+  if (!isMuteLifted(member)) {
+    throw createTelegramResultError("unmute verification", describeMemberRestrictions(member));
+  }
+  return member;
+}
+
+function clearMuteState(chatId, userId) {
+  const key = `${chatId}:${userId}`;
+  const timer = muteTimers.get(key);
+  if (timer) clearTimeout(timer);
+  muteTimers.delete(key);
+  if (activeMutes.delete(key)) saveChatSettings();
+}
+
+function scheduleMuteExpiration(record) {
+  const key = `${record.chatId}:${record.userId}`;
+  const previous = muteTimers.get(key);
+  if (previous) clearTimeout(previous);
+  const remainingMs = Math.max(0, Date.parse(record.expiresAt) - Date.now());
+  const delayMs = Math.min(remainingMs, MAX_NODE_TIMER_MS);
+  const timer = setTimeout(async () => {
+    muteTimers.delete(key);
+    if (Date.parse(record.expiresAt) > Date.now()) {
+      scheduleMuteExpiration(record);
+      return;
+    }
+    try {
+      await liftMuteVerified(record.chatId, record.userId);
+      clearMuteState(record.chatId, record.userId);
+      await sendMessageSafe(record.chatId, `🔊 С пользователя ${record.displayName} снят мут: срок ограничения закончился.`);
+    } catch (error) {
+      console.error(`Automatic unmute failed (${key}):`, getErrorMessage(error));
+      const retryTimer = setTimeout(() => scheduleMuteExpiration(record), MUTE_RETRY_DELAY_MS);
+      retryTimer.unref?.();
+      muteTimers.set(key, retryTimer);
+    }
+  }, delayMs);
+  timer.unref?.();
+  muteTimers.set(key, timer);
+}
+
+async function restoreActiveMutes() {
+  for (const record of activeMutes.values()) scheduleMuteExpiration(record);
+}
+
 async function ensureOwnerModeratableTarget(msg, targetProfile, actionText) {
   if (targetProfile.id === msg.from.id) {
     return `⛔ Нельзя ${actionText} самого себя.`;
@@ -2790,11 +3091,11 @@ async function getChatPermissionsWithSlowMode(chatId, seconds) {
       can_send_polls: currentPermissions.can_send_polls !== false,
       can_send_other_messages: currentPermissions.can_send_other_messages !== false,
       can_add_web_page_previews: currentPermissions.can_add_web_page_previews !== false,
+      can_react_to_messages: currentPermissions.can_react_to_messages !== false,
       can_change_info: currentPermissions.can_change_info === true,
       can_invite_users: currentPermissions.can_invite_users !== false,
       can_pin_messages: currentPermissions.can_pin_messages === true,
-      can_manage_topics: currentPermissions.can_manage_topics === true,
-      slow_mode_delay: seconds
+      can_manage_topics: currentPermissions.can_manage_topics === true
     };
   } catch {
     return {
@@ -2808,11 +3109,11 @@ async function getChatPermissionsWithSlowMode(chatId, seconds) {
       can_send_polls: true,
       can_send_other_messages: true,
       can_add_web_page_previews: true,
+      can_react_to_messages: true,
       can_change_info: false,
       can_invite_users: true,
       can_pin_messages: false,
-      can_manage_topics: false,
-      slow_mode_delay: seconds
+      can_manage_topics: false
     };
   }
 }
@@ -2838,11 +3139,11 @@ function getLockedChatPermissions(slowModeDelay = 0) {
     can_send_polls: false,
     can_send_other_messages: false,
     can_add_web_page_previews: false,
+    can_react_to_messages: false,
     can_change_info: false,
     can_invite_users: true,
     can_pin_messages: false,
-    can_manage_topics: false,
-    slow_mode_delay: slowModeDelay
+    can_manage_topics: false
   };
 }
 
@@ -2858,11 +3159,11 @@ function getUnlockedChatPermissions(slowModeDelay = 0) {
     can_send_polls: true,
     can_send_other_messages: true,
     can_add_web_page_previews: true,
+    can_react_to_messages: true,
     can_change_info: false,
     can_invite_users: true,
     can_pin_messages: false,
-    can_manage_topics: false,
-    slow_mode_delay: slowModeDelay
+    can_manage_topics: false
   };
 }
 
@@ -2894,44 +3195,6 @@ function parseMuteDuration(text) {
   return null;
 }
 
-function getMutedPermissions() {
-  return {
-    can_send_messages: false,
-    can_send_audios: false,
-    can_send_documents: false,
-    can_send_photos: false,
-    can_send_videos: false,
-    can_send_video_notes: false,
-    can_send_voice_notes: false,
-    can_send_polls: false,
-    can_send_other_messages: false,
-    can_add_web_page_previews: false,
-    can_change_info: false,
-    can_invite_users: false,
-    can_pin_messages: false,
-    can_manage_topics: false
-  };
-}
-
-function getFullPermissions() {
-  return {
-    can_send_messages: true,
-    can_send_audios: true,
-    can_send_documents: true,
-    can_send_photos: true,
-    can_send_videos: true,
-    can_send_video_notes: true,
-    can_send_voice_notes: true,
-    can_send_polls: true,
-    can_send_other_messages: true,
-    can_add_web_page_previews: true,
-    can_change_info: false,
-    can_invite_users: true,
-    can_pin_messages: false,
-    can_manage_topics: false
-  };
-}
-
 function getGroupMenuText() {
   return "✅ Я так рад, что меня добавили!\n\n" +
     "Пока я признаю команды только админов этого чата.\n\n" +
@@ -2949,7 +3212,7 @@ function getMainMenuText() {
     ["top", "🏆 Топ: /top"],
     ["commands", "🛡 Модерация: /commands"]
   ]
-    .filter(([commandName]) => isCommandEnabled(commandName))
+    .filter(([commandName]) => isCommandVisibleInUserInterface(commandName))
     .map(([, text]) => text);
 
   const quickActions = [
@@ -2990,6 +3253,7 @@ const COMMANDS_PAGES = [
       { setting: "dice", sticker: "🎲", command: "/dice 10", description: "кости на ставку" },
       { setting: "casino", sticker: "🎰", command: "/casino 10", description: "слот-машина на ставку" },
       { setting: "quiz", sticker: "❓", command: "/quiz", description: "викторина за монеты" },
+      { setting: "quizstats", sticker: "🏆", command: "/quizstats", description: "рейтинг викторины" },
       { setting: "menu", sticker: "🆘", command: "/help", description: "как пользоваться командами" },
       { setting: "profile", sticker: "👤", command: "/profile", description: "профиль пользователя" },
       { setting: "top", sticker: "🏆", command: "/top", description: "топ активных участников" },
@@ -2999,7 +3263,9 @@ const COMMANDS_PAGES = [
       { setting: "id", sticker: "🆔", command: "/id", description: "ID пользователя или сообщения" },
       { setting: "emojiid", sticker: "💎", command: "/emojiid", description: "ID Premium Emoji из ответа" },
       { setting: "chatinfo", sticker: "ℹ️", command: "/chatinfo", description: "информация о группе" },
-      { setting: "tagall", sticker: "📢", command: "/tagall или тег все", description: "позвать всех по одному" }
+      { setting: "tagall", sticker: "📢", command: "/tagall или тег все", description: "позвать всех по одному" },
+      { setting: "tagall", sticker: "⏸", command: "/tagpause /tagresume", description: "управление вызовом" },
+      { setting: "tagall", sticker: "⏹", command: "/tagstop или /stopcall", description: "остановить вызов" }
     ]
   },
   {
@@ -3053,6 +3319,8 @@ const COMMANDS_PAGES = [
       { setting: "career", sticker: "🔁", command: "сменить профессию", description: "выбрать карьеру" },
       { setting: "razvod", sticker: "💔", command: "/razvod или развод", description: "игровой развод" },
       { setting: "partner", sticker: "💞", command: "/partner", description: "показать вторую половинку" },
+      { setting: "reportbug", sticker: "🐞", command: "/reportbug", description: "сообщить об ошибке" },
+      { setting: "diagnostics", sticker: "🩺", command: "/diagnostics", description: "диагностика для владельца" },
       { setting: "action", sticker: "🎭", command: "ударить / обнять / убить", description: "ролевые действия ответом" },
       { sticker: "🎲", command: "сливки шанс", description: "рандомная вероятность" },
       { sticker: "🏆", command: "сливки кто лучший", description: "выбрать случайного участника" }
@@ -3062,7 +3330,7 @@ const COMMANDS_PAGES = [
 
 function getVisibleCommands(pageData) {
   return pageData.commands.filter((item) => {
-    return !item.setting || isCommandEnabled(item.setting);
+    return !item.setting || isCommandVisibleInUserInterface(item.setting);
   });
 }
 
@@ -3100,7 +3368,7 @@ function getCommandsKeyboard(page = 0) {
   const nextPage = safePage === COMMANDS_PAGES.length - 1 ? 0 : safePage + 1;
 
   return {
-    disable_web_page_preview: true,
+    link_preview_options: { is_disabled: true },
     reply_markup: {
       inline_keyboard: [
         COMMANDS_PAGES.map((_, index) => ({
@@ -3219,7 +3487,7 @@ bot.onText(/^\/start(?:@([A-Za-z0-9_]{5,32}))?(?:\s|$)/i, async (msg, match) => 
 
     bot.sendMessage(
       msg.chat.id,
-      "🍦 Привет! Я «Сливки Бот»\n\nЧтобы активировать мои команды, добавь меня в группу и дай права администратора.\n\nВ группе доступны:\n\n👤 профиль пользователя;\n\n⛑ инструменты для модерации;\n\n⚠️ предупреждения пользователей;\n\n🔇 мут и снятие мута;\n\n🚫 бан и разбан участников;\n\n📋 удобное меню команд;\n\n👋 уведомления о входе и выходе участников;",
+      "🍦 Привет! Я «Сливки Бот»\n\nЧтобы активировать мои команды, добавь меня в группу и дай права администратора.\n\nВ группе доступны:\n\n⛑ инструменты для модерации;\n\n⚠️ предупреждения пользователей;\n\n🔇 мут и снятие мута;\n\n🚫 бан и разбан участников;\n\n📋 удобное меню команд;\n\n👋 уведомления о входе и выходе участников;",
       {
         reply_markup: {
           inline_keyboard: [
@@ -3287,6 +3555,54 @@ function getBetValidationError(user, bet, commandName) {
   return "";
 }
 
+function createGameReplayToken() {
+  return randomBytes(8).toString("hex");
+}
+
+function createGameKeyboard(gameType, bet, userId) {
+  const code = gameType === "dice" ? "d" : "c";
+  return {
+    reply_markup: {
+      inline_keyboard: [[{
+        text: "Сыграть ещё",
+        callback_data: `bet:${code}:${bet}:${userId}:${createGameReplayToken()}`
+      }]]
+    }
+  };
+}
+
+function settleGameRound(user, gameType, bet, operationId) {
+  const generated = gameType === "dice" ? playDice() : playCasino();
+  const settlement = currencyStore.settleBet(user, {
+    operationId,
+    bet,
+    multiplier: generated.multiplier,
+    metadata: generated
+  });
+  if (!settlement) return null;
+  return { settlement, result: settlement.metadata };
+}
+
+function formatGameRound(gameType, round) {
+  const { settlement, result } = round;
+  const title = gameType === "dice" ? "🎲 КОСТЬ" : "🎰 КАЗИНО";
+  const visual = gameType === "dice" ? `Выпало: ${result.roll}` : result.slots.join("  ");
+  const outcome = settlement.won
+    ? `✅ Победа\n💵 Выплата: ${settlement.payout} монет\n📈 Чистый выигрыш: +${settlement.payout - settlement.bet} монет`
+    : `❌ Поражение\n📉 Проигрыш: ${settlement.bet} монет`;
+  return [
+    title,
+    "",
+    visual,
+    "",
+    `Ставка: ${settlement.bet} монет`,
+    `Баланс до: ${settlement.balanceBefore} монет`,
+    `Коэффициент: x${settlement.multiplier}`,
+    outcome,
+    `Баланс после: ${settlement.balanceAfter} монет`
+  ].join("\n");
+}
+
 bot.onText(/^\/balance(?:@\w+)?(?:\s|$)/i, (msg) => {
   getUser(msg.from);
   registerUserInChat(msg);
@@ -3297,11 +3613,11 @@ bot.onText(/^\/balance(?:@\w+)?(?:\s|$)/i, (msg) => {
   bot.sendMessage(
     msg.chat.id,
     `💰 Баланс: ${balance} монет`,
-    { reply_to_message_id: msg.message_id }
+    { reply_parameters: { message_id: msg.message_id } }
   );
 });
 
-bot.onText(/^\/dice(?:@\w+)?(?:\s+(\S+))?\s*$/i, (msg, match) => {
+bot.onText(/^\/dice(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
   getUser(msg.from);
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "dice")) return;
@@ -3310,29 +3626,20 @@ bot.onText(/^\/dice(?:@\w+)?(?:\s+(\S+))?\s*$/i, (msg, match) => {
   const validationError = getBetValidationError(msg.from, bet, "dice");
 
   if (validationError) {
-    bot.sendMessage(msg.chat.id, validationError, { reply_to_message_id: msg.message_id });
+    bot.sendMessage(msg.chat.id, validationError, { reply_parameters: { message_id: msg.message_id } });
     return;
   }
 
-  currencyStore.subtractBalance(msg.from, bet);
-  const result = playDice();
-  const payout = result.won ? bet * result.multiplier : 0;
-  const newBalance = result.won
-    ? currencyStore.addBalance(msg.from, payout)
-    : currencyStore.getBalance(msg.from);
-
-  bot.sendMessage(
-    msg.chat.id,
-    [
-      `🎲 Выпало: ${result.roll}`,
-      result.won ? `✅ Победа! Выигрыш: ${payout} монет (x${result.multiplier}).` : `❌ Проигрыш. Ставка ${bet} монет сгорела.`,
-      `💰 Новый баланс: ${newBalance} монет`
-    ].join("\n"),
-    { reply_to_message_id: msg.message_id }
-  );
+  const round = settleGameRound(msg.from, "dice", bet, `dice:${msg.chat.id}:${msg.message_id}`);
+  if (!round) return bot.sendMessage(msg.chat.id, getBetValidationError(msg.from, bet, "dice"));
+  if (round.settlement.replayed) return;
+  await bot.sendMessage(msg.chat.id, formatGameRound("dice", round), {
+    reply_parameters: { message_id: msg.message_id },
+    ...createGameKeyboard("dice", bet, msg.from.id)
+  });
 });
 
-bot.onText(/^\/casino(?:@\w+)?(?:\s+(\S+))?\s*$/i, (msg, match) => {
+bot.onText(/^\/casino(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
   getUser(msg.from);
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "casino")) return;
@@ -3341,49 +3648,233 @@ bot.onText(/^\/casino(?:@\w+)?(?:\s+(\S+))?\s*$/i, (msg, match) => {
   const validationError = getBetValidationError(msg.from, bet, "casino");
 
   if (validationError) {
-    bot.sendMessage(msg.chat.id, validationError, { reply_to_message_id: msg.message_id });
+    bot.sendMessage(msg.chat.id, validationError, { reply_parameters: { message_id: msg.message_id } });
     return;
   }
 
-  currencyStore.subtractBalance(msg.from, bet);
-  const result = playCasino();
-  const payout = Math.floor(bet * result.multiplier);
-  const newBalance = result.won
-    ? currencyStore.addBalance(msg.from, payout)
-    : currencyStore.getBalance(msg.from);
-
-  bot.sendMessage(
-    msg.chat.id,
-    [
-      `🎰 ${result.slots.join(" ")}`,
-      result.won ? `✅ Выигрыш: ${payout} монет (x${result.multiplier}).` : `❌ Не повезло. Ставка ${bet} монет сгорела.`,
-      `💰 Новый баланс: ${newBalance} монет`
-    ].join("\n"),
-    { reply_to_message_id: msg.message_id }
-  );
+  const round = settleGameRound(msg.from, "casino", bet, `casino:${msg.chat.id}:${msg.message_id}`);
+  if (!round) return bot.sendMessage(msg.chat.id, getBetValidationError(msg.from, bet, "casino"));
+  if (round.settlement.replayed) return;
+  await bot.sendMessage(msg.chat.id, formatGameRound("casino", round), {
+    reply_parameters: { message_id: msg.message_id },
+    ...createGameKeyboard("casino", bet, msg.from.id)
+  });
 });
 
-bot.onText(/^\/quiz(?:@\w+)?(?:\s|$)/i, (msg) => {
+const QUIZ_CATEGORY_ALIASES = Object.freeze({
+  наука: "science", география: "geography", история: "history", литература: "literature",
+  технологии: "technology", математика: "math", культура: "culture", спорт: "sport"
+});
+const QUIZ_DIFFICULTY_ALIASES = Object.freeze({ легко: "easy", средне: "medium", сложно: "hard" });
+
+function parseQuizFilters(value) {
+  const tokens = String(value || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  let category;
+  let difficulty;
+  for (const token of tokens) {
+    const normalizedCategory = CATEGORY_LABELS[token] ? token : QUIZ_CATEGORY_ALIASES[token];
+    const normalizedDifficulty = DIFFICULTY_LABELS[token] ? token : QUIZ_DIFFICULTY_ALIASES[token];
+    if (normalizedCategory) category = normalizedCategory;
+    else if (normalizedDifficulty) difficulty = normalizedDifficulty;
+    else return { error: `Неизвестный фильтр: ${token}` };
+  }
+  return { category, difficulty };
+}
+
+function scheduleQuizExpiration(quiz) {
+  const previous = quizTimers.get(quiz.id);
+  if (previous) clearTimeout(previous);
+  const delay = Math.min(Math.max(0, Date.parse(quiz.expiresAt) - Date.now()), MAX_NODE_TIMER_MS);
+  const timer = setTimeout(async () => {
+    quizTimers.delete(quiz.id);
+    if (Date.parse(quiz.expiresAt) > Date.now()) return scheduleQuizExpiration(quiz);
+    const result = quizManager.expireQuiz(quiz.id);
+    if (result.status !== "expired" || !result.quiz.messageId) return;
+    await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
+      chat_id: result.quiz.chatId, message_id: result.quiz.messageId
+    }).catch(() => {});
+    await sendMessageSafe(
+      result.quiz.chatId,
+      `⏰ Время викторины истекло.\nПравильный ответ: ${result.quiz.question.options[result.quiz.question.correctIndex]}`
+    );
+  }, delay);
+  timer.unref?.();
+  quizTimers.set(quiz.id, timer);
+}
+
+function restoreQuizTimers() {
+  for (const quiz of quizManager.getActiveQuizzes()) scheduleQuizExpiration(quiz);
+}
+
+bot.onText(/^\/quiz(?:@\w+)?(?:\s+([\s\S]+?))?\s*$/i, async (msg, match) => {
   getUser(msg.from);
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "quiz")) return;
-
-  const { quizId, question } = quizManager.createQuiz(msg.chat.id);
-
-  bot.sendMessage(
+  const filters = parseQuizFilters(match?.[1]);
+  if (filters.error) {
+    await bot.sendMessage(msg.chat.id, `${filters.error}\n\nКатегории: ${Object.keys(CATEGORY_LABELS).join(", ")}\nСложность: easy, medium, hard`);
+    return;
+  }
+  const { quizId, question, expiresAt } = quizManager.createQuiz(msg.chat.id, filters);
+  const sent = await bot.sendMessage(
     msg.chat.id,
     [
       "❓ Викторина",
-      "",
+      `📚 Категория: ${CATEGORY_LABELS[question.category]}`,
+      `🎚 Сложность: ${DIFFICULTY_LABELS[question.difficulty]}`,
+      `⏱ Время: ${Math.round((Date.parse(expiresAt) - Date.now()) / 1000)} секунд`, "",
       question.question,
       "",
       `Первый правильный ответ получит ${QUIZ_REWARD} монет.`
     ].join("\n"),
     {
-      reply_to_message_id: msg.message_id,
+      reply_parameters: { message_id: msg.message_id },
       ...quizManager.getKeyboard(quizId, question)
     }
   );
+  quizManager.setMessageRef(quizId, msg.chat.id, sent.message_id);
+  const activeQuiz = quizManager.getActiveQuizzes().find((quiz) => quiz.id === quizId);
+  if (activeQuiz) scheduleQuizExpiration(activeQuiz);
+});
+
+bot.onText(/^\/quizstats(?:@\w+)?(?:\s|$)/i, async (msg) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "quizstats")) return;
+  const leaders = quizManager.getLeaderboard(10);
+  const lines = leaders.map((entry, index) => `${index + 1}. ${entry.name} — ${entry.correct}/${entry.answers}`);
+  await bot.sendMessage(msg.chat.id, ["🏆 Лучшие игроки викторины", "", ...(lines.length ? lines : ["Пока нет результатов."])].join("\n"));
+});
+
+async function collectDiagnostics(msg) {
+  const checks = [];
+  try {
+    const me = await bot.getMe();
+    checks.push(diagnosticCheck("Telegram API", Boolean(me?.id), `getMe: @${me?.username || me?.id}`));
+    if (!isPrivateChat(msg)) {
+      try {
+        const member = await bot.getChatMember(msg.chat.id, me.id);
+        const isAdmin = member.status === "administrator" || member.status === "creator";
+        const rights = ["can_restrict_members", "can_promote_members", "can_delete_messages"]
+          .filter((right) => member[right] === true);
+        checks.push(diagnosticCheck(
+          "Permissions",
+          isAdmin,
+          isAdmin ? `status=${member.status}; права=${rights.join(", ") || "базовые"}` : `status=${member.status}; административные команды недоступны`,
+          isAdmin ? "ok" : "warning"
+        ));
+      } catch (error) {
+        checks.push(diagnosticCheck("Permissions", false, getErrorMessage(error)));
+      }
+    } else {
+      checks.push(diagnosticCheck("Permissions", true, "личный чат: административные права не требуются", "warning"));
+    }
+  } catch (error) {
+    checks.push(diagnosticCheck("Telegram API", false, getErrorMessage(error)));
+    checks.push(diagnosticCheck("Permissions", false, "getMe завершился ошибкой"));
+  }
+
+  checks.push(...inspectRpgArchitecture(__dirname));
+  checks.push(...inspectRpgRuntime(RPG_STATE_FILE));
+  checks.push(...inspectJsonFiles([
+    USERS_FILE, CHATS_FILE, STATS_FILE, MARRIAGES_FILE, CHAT_SETTINGS_FILE, COMMAND_SETTINGS_FILE,
+    ADMIN_LOGS_FILE, CURRENCY_FILE, QUIZ_STATE_FILE, PREMIUM_EMOJI_FILE, BUG_REPORTS_FILE
+  ]));
+  checks.push(inspectStorage(__dirname));
+  checks.push(inspectPremiumEmoji({ ...PREMIUM_EMOJI, ...RP_PREMIUM_EMOJI, ...RP_COMMAND_PREMIUM_EMOJI }));
+  const economyHealth = currencyStore.healthCheck();
+  checks.push(diagnosticCheck("Economy Repository", economyHealth.ok, economyHealth.detail));
+  const activeQuizCount = quizManager.getActiveQuizzes().length;
+  const legacyTimersHealthy = [...activeMutes.keys()].every((key) => muteTimers.has(key)) && quizTimers.size >= activeQuizCount;
+  checks.push(diagnosticCheck(
+    "Legacy Scheduler",
+    legacyTimersHealthy,
+    `mute records/timers=${activeMutes.size}/${muteTimers.size}; quiz records/timers=${activeQuizCount}/${quizTimers.size}; tag=${tagCallController.has(msg.chat.id) ? "active" : "idle"}`
+  ));
+  checks.push(diagnosticCheck(
+    "Callback routing",
+    callbackHandlerCount > 0,
+    `защищённых обработчиков=${callbackHandlerCount}; idempotency cache=${processedCallbackQueries.size}`
+  ));
+  return checks;
+}
+
+bot.onText(/^\/diagnostics(?:@\w+)?\s*$/i, async (msg) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "diagnostics")) return;
+  if (!isOwner(msg.from.id)) {
+    await sendMessageSafe(msg.chat.id, "⛔ Диагностика доступна только владельцу бота.");
+    return;
+  }
+  const status = await sendMessageSafe(msg.chat.id, "🩺 Выполняю диагностику…", { reply_parameters: { message_id: msg.message_id } });
+  const text = formatDiagnostics(await collectDiagnostics(msg));
+  if (status?.message_id) {
+    try {
+      await bot.editMessageText(text, { chat_id: msg.chat.id, message_id: status.message_id });
+      return;
+    } catch (error) {
+      console.error("Diagnostics edit error:", getErrorMessage(error));
+    }
+  }
+  await sendMessageSafe(msg.chat.id, text);
+});
+
+bot.onText(/^\/reportbug(?:@\w+)?(?:\s+([\s\S]+))?\s*$/i, async (msg, match) => {
+  registerUserInChat(msg);
+  if (!ensureCommandEnabled(msg, "reportbug")) return;
+  const repliedText = String(msg.reply_to_message?.text || msg.reply_to_message?.caption || "").trim();
+  const description = String(match?.[1] || (repliedText ? `Ошибка в сообщении: ${repliedText}` : "")).trim().slice(0, 1500);
+  if (!description) {
+    await sendMessageSafe(
+      msg.chat.id,
+      "🐞 Добавьте описание после команды или ответьте /reportbug на проблемное сообщение.",
+      { reply_parameters: { message_id: msg.message_id } }
+    );
+    return;
+  }
+  const relatedError = [...runtimeErrors].reverse().find((entry) =>
+    Number(entry.context?.chatId) === Number(msg.chat.id) || Number(entry.context?.userId) === Number(msg.from.id)
+  );
+  const reportId = `bug-${Date.now().toString(36)}-${randomBytes(5).toString("hex")}`;
+  const correlationId = relatedError?.correlationId || `report-${randomBytes(8).toString("hex")}`;
+  const reportedText = repliedText || String(msg.text || "");
+  const report = {
+    id: reportId,
+    chat: { id: msg.chat.id, type: msg.chat.type, title: msg.chat.title || null },
+    message: {
+      id: msg.message_id,
+      threadId: msg.message_thread_id || null,
+      replyToMessageId: msg.reply_to_message?.message_id || null,
+      text: reportedText.slice(0, 2000)
+    },
+    command: reportedText.trim().split(/\s+/)[0] || null,
+    user: {
+      id: msg.from.id,
+      username: msg.from.username || null,
+      firstName: msg.from.first_name || null,
+      lastName: msg.from.last_name || null
+    },
+    correlationId,
+    occurredAt: new Date().toISOString(),
+    log: relatedError || { source: "user_report", message: "Связанный runtime error не найден" },
+    description
+  };
+  try {
+    bugReportStore.append(report);
+  } catch (error) {
+    const failureId = recordRuntimeError("reportbug.storage", error, { chatId: msg.chat.id, messageId: msg.message_id, userId: msg.from.id });
+    await sendMessageSafe(msg.chat.id, `❌ Не удалось сохранить отчёт. Код ошибки: ${failureId}`);
+    return;
+  }
+  await sendMessageSafe(msg.chat.id, `✅ Отчёт сохранён. ID: ${reportId}\nCorrelation ID: ${correlationId}`);
+  for (const ownerId of ownerIds) {
+    if (Number(ownerId) === Number(msg.from.id) && Number(msg.chat.id) === Number(ownerId)) continue;
+    await sendMessageSafe(
+      ownerId,
+      `🐞 Новый bug report\nID: ${reportId}\nCorrelation ID: ${correlationId}\nПользователь: ${getTelegramName(msg.from)} (${msg.from.id})\nОписание: ${description}`,
+      {},
+      "bug report notification"
+    );
+  }
 });
 
 bot.on("callback_query", async (query) => {
@@ -3398,9 +3889,40 @@ bot.on("callback_query", async (query) => {
     return;
   }
 
+  if (data.startsWith("bet:")) {
+    const [, gameCode, betValue, expectedUserId, token] = data.split(":");
+    const gameType = gameCode === "d" ? "dice" : gameCode === "c" ? "casino" : null;
+    const bet = parseBet(betValue);
+    if (!gameType || !bet || !token) {
+      await answerCallbackSafe(query.id, { text: "Некорректный игровой callback.", show_alert: true });
+      return;
+    }
+    if (Number(expectedUserId) !== Number(userId)) {
+      await answerCallbackSafe(query.id, { text: "Эта кнопка принадлежит другому игроку.", show_alert: true });
+      return;
+    }
+    const validationError = getBetValidationError(query.from, bet, gameType);
+    if (validationError) {
+      await answerCallbackSafe(query.id, { text: validationError.slice(0, 180), show_alert: true });
+      return;
+    }
+    const round = settleGameRound(query.from, gameType, bet, `callback:${token}`);
+    if (!round || round.settlement.replayed) {
+      await answerCallbackSafe(query.id, { text: "Этот раунд уже обработан.", show_alert: true });
+      return;
+    }
+    await answerCallbackSafe(query.id, { text: round.settlement.won ? "Победа!" : "Поражение" });
+    await bot.editMessageText(formatGameRound(gameType, round), {
+      chat_id: chatId,
+      message_id: messageId,
+      ...createGameKeyboard(gameType, bet, userId)
+    });
+    return;
+  }
+
   if (data.startsWith("quiz:")) {
     const [, quizId, optionIndex] = data.split(":");
-    const result = quizManager.answer(quizId, optionIndex);
+    const result = quizManager.answer(quizId, optionIndex, query.from);
 
     if (result.status === "missing") {
       await answerCallbackSafe(query.id, { text: "Викторина уже завершена.", show_alert: true });
@@ -3409,6 +3931,24 @@ bot.on("callback_query", async (query) => {
 
     if (result.status === "answered") {
       await answerCallbackSafe(query.id, { text: "На этот вопрос уже ответили.", show_alert: true });
+      return;
+    }
+
+    if (result.status === "attempted") {
+      await answerCallbackSafe(query.id, { text: "Вы уже отвечали на этот вопрос.", show_alert: true });
+      return;
+    }
+
+    if (result.status === "expired") {
+      if (chatId && messageId) {
+        await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => { });
+      }
+      await answerCallbackSafe(query.id, { text: "Время ответа истекло.", show_alert: true });
+      return;
+    }
+
+    if (result.status === "invalid_user" || result.status === "invalid_option") {
+      await answerCallbackSafe(query.id, { text: "Некорректный ответ.", show_alert: true });
       return;
     }
 
@@ -3421,7 +3961,12 @@ bot.on("callback_query", async (query) => {
       registerUserInChat({ chat: query.message.chat, from: query.from });
     }
 
-    const newBalance = currencyStore.addBalance(query.from, result.reward);
+    const reward = currencyStore.creditOnce(query.from, {
+      operationId: `quiz:${quizId}`,
+      amount: result.reward,
+      metadata: { quizId, questionId: result.quiz.questionId }
+    });
+    const newBalance = reward.balanceAfter;
     const winner = getUser(query.from);
     const winnerName = getUserDisplayName(winner);
 
@@ -3430,6 +3975,9 @@ bot.on("callback_query", async (query) => {
     if (chatId && messageId) {
       await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: chatId, message_id: messageId }).catch(() => { });
     }
+    const timer = quizTimers.get(quizId);
+    if (timer) clearTimeout(timer);
+    quizTimers.delete(quizId);
 
     await bot.sendMessage(
       chatId,
@@ -3439,7 +3987,12 @@ bot.on("callback_query", async (query) => {
   }
 
   if (data === "support_open") {
-    supportUsers.add(userId);
+    const now = Date.now();
+    for (const [pendingUserId, expiresAt] of supportUsers) {
+      if (expiresAt <= now) supportUsers.delete(pendingUserId);
+    }
+    supportUsers.set(userId, now + 10 * 60 * 1000);
+    while (supportUsers.size > MAX_SUPPORT_SESSIONS) supportUsers.delete(supportUsers.keys().next().value);
 
     await bot.sendMessage(
       query.message.chat.id,
@@ -3453,7 +4006,8 @@ bot.on("callback_query", async (query) => {
     const [action, proposalId] = data.split(":");
     const proposal = pendingMarriages.get(proposalId);
 
-    if (!proposal) {
+    if (!proposal || proposal.expiresAt <= Date.now()) {
+      pendingMarriages.delete(proposalId);
       await answerCallbackSafe(query.id, {
         text: "⏳ Предложение уже устарело.",
         show_alert: true
@@ -3559,7 +4113,10 @@ bot.on("callback_query", async (query) => {
     return;
   }
 
-  if (!data.startsWith("admin_") && !data.startsWith("toggle_command:")) return;
+  if (!data.startsWith("admin_") && !data.startsWith("toggle_command:")) {
+    await answerCallbackSafe(query.id, { text: "Эта кнопка устарела или больше не поддерживается.", show_alert: true });
+    return;
+  }
 
   if (!isOwner(userId)) {
     await answerCallbackSafe(query.id, {
@@ -3757,6 +4314,11 @@ bot.onText(/^(?:\/profile(?:@\w+)?|профиль)(?:\s|$)/i, async (msg) => {
   const tagText = getUserTag(targetUser);
   const statusText = getStatusLabel(memberStatus);
   const fullName = getFullName(targetUser);
+  const marriageRecord = getMarriageRecord(msg.chat.id, targetUser.id);
+  const marriagePartner = marriageRecord ? users.get(marriageRecord.partnerId) : null;
+  const marriageText = marriageRecord
+    ? `\n\n💞 Партнёр: ${marriagePartner ? getMarriageDisplayName(marriagePartner) : `ID:${marriageRecord.partnerId}`}\n${formatMarriageDetails(marriageRecord.marriedAt)}`
+    : "";
 
   const profileText =
     `🍦 «СЛИВКИ» • профиль пользователя\n\n` +
@@ -3768,7 +4330,8 @@ bot.onText(/^(?:\/profile(?:@\w+)?|профиль)(?:\s|$)/i, async (msg) => {
     `👀 Статус в группе: ${statusText}\n` +
     `↘️ Вступил(а): ${joinedDate}\n\n` +
     `💬 Сообщений: ${profile.messages}\n` +
-    `⚠️ Предупреждения: ${profile.warnings}/3`;
+    `⚠️ Предупреждения: ${profile.warnings}/3` +
+    marriageText;
 
   bot.sendMessage(msg.chat.id, profileText);
 });
@@ -3847,7 +4410,7 @@ bot.onText(/^\/emojiid(?:@\w+)?(?:\s|$)/i, (msg) => {
       ].join("\n"),
       {
         parse_mode: "HTML",
-        reply_to_message_id: msg.message_id
+        reply_parameters: { message_id: msg.message_id }
       }
     );
     return;
@@ -3868,7 +4431,7 @@ bot.onText(/^\/emojiid(?:@\w+)?(?:\s|$)/i, (msg) => {
     "💎 <b>Найденные Premium Emoji ID:</b>\n\n" + text,
     {
       parse_mode: "HTML",
-      reply_to_message_id: msg.message_id
+      reply_parameters: { message_id: msg.message_id }
     }
   );
 });
@@ -3890,7 +4453,7 @@ bot.onText(/^(?:\/id(?:@\w+)?|айди)(?:\s+(.+))?$/i, (msg) => {
     `🧾 Message ID: ${targetMessageId}`
   ].join("\n");
 
-  bot.sendMessage(msg.chat.id, text, { reply_to_message_id: msg.message_id });
+  bot.sendMessage(msg.chat.id, text, { reply_parameters: { message_id: msg.message_id } });
 });
 
 bot.onText(/^\/chatinfo(?:@\w+)?$/i, async (msg) => {
@@ -4112,7 +4675,7 @@ bot.onText(/^\/resetlinks(?:@\w+)?$/i, async (msg) => {
   }
 });
 
-bot.onText(/^(?:сетка\s+)?([+-])\s*тг\s+админ(?:\s+(.+))?$/i, async (msg, match) => {
+bot.onText(/^(?:(?:сетка\s+)?([+-])\s*тг\s+админ|\/(tg-admin|tg_admin|untg-admin|untg_admin)(?:@\w+)?)(?:\s+(.+))?$/i, async (msg, match) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "tgadmin")) return;
 
@@ -4121,8 +4684,8 @@ bot.onText(/^(?:сетка\s+)?([+-])\s*тг\s+админ(?:\s+(.+))?$/i, async 
     return;
   }
 
-  const sign = match[1];
-  const args = (match[2] || "").trim();
+  const sign = match[1] || (String(match[2]).toLowerCase().startsWith("untg") ? "-" : "+");
+  const args = (match[3] || "").trim();
   const target = resolveTargetIdentity(msg, args);
 
   if (!target) {
@@ -4146,49 +4709,17 @@ bot.onText(/^(?:сетка\s+)?([+-])\s*тг\s+админ(?:\s+(.+))?$/i, async 
 
   for (const chatId of chatIds) {
     try {
-      const canPromote = await canBotUsePermission(chatId, "can_promote_members");
-
-      if (!canPromote) {
-        failed.push(`${getChatTitle(chatId)} — нет права назначать админов`);
+      const change = await changeTelegramAdminVerified(chatId, target.userId, sign === "+", title);
+      if (!change.changed) {
+        failed.push(`${getChatTitle(chatId)} — ${change.reason}`);
         continue;
       }
-
       if (sign === "+") {
-        await bot.promoteChatMember(chatId, target.userId, {
-          can_manage_chat: true,
-          can_delete_messages: true,
-          can_restrict_members: true,
-          can_invite_users: true,
-          can_pin_messages: true,
-          can_manage_topics: true,
-          can_promote_members: false,
-          can_change_info: false,
-          can_manage_video_chats: true
-        });
-
-        if (title) {
-          await bot.setChatAdministratorCustomTitle(chatId, target.userId, title.slice(0, 16)).catch((error) => {
-            console.error("Set admin title error:", getErrorMessage(error));
-          });
-        }
-
         addAdminLog(chatId, "👮 Выдал тг админа", msg.from, target.displayName, title ? `Должность: ${title}` : "");
       } else {
-        await bot.promoteChatMember(chatId, target.userId, {
-          can_manage_chat: false,
-          can_delete_messages: false,
-          can_restrict_members: false,
-          can_invite_users: false,
-          can_pin_messages: false,
-          can_manage_topics: false,
-          can_promote_members: false,
-          can_change_info: false,
-          can_manage_video_chats: false
-        });
-
         addAdminLog(chatId, "👮 Снял тг админа", msg.from, target.displayName);
       }
-
+      if (change.titleWarning) failed.push(`${getChatTitle(chatId)} — ${change.titleWarning}`);
       successCount += 1;
     } catch (error) {
       failed.push(`${getChatTitle(chatId)} — ${getTelegramFailureReason(error)}`);
@@ -4228,11 +4759,12 @@ bot.onText(/^\/(partner|партнер)(?:@\w+)?(?:\s|$)/i, (msg) => {
 
   const partner = users.get(partnerId);
   const partnerName = partner ? getMarriageDisplayName(partner) : `ID:${partnerId}`;
+  const marriageRecord = getMarriageRecord(msg.chat.id, msg.from.id);
 
   bot.sendMessage(
     msg.chat.id,
-    `💞 Твоя игровая вторая половинка: ${partnerName}`,
-    { reply_to_message_id: msg.message_id }
+    [`💞 Твоя игровая вторая половинка: ${partnerName}`, "", formatMarriageDetails(marriageRecord?.marriedAt)].join("\n"),
+    { reply_parameters: { message_id: msg.message_id } }
   );
 });
 
@@ -4245,7 +4777,7 @@ bot.onText(/^\/ollban(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
     await sendMessageSafe(
       msg.chat.id,
       "⚠️ Массовый бан не запущен.\n\nДля подтверждения напиши: /ollban confirm",
-      { reply_to_message_id: msg.message_id },
+      { reply_parameters: { message_id: msg.message_id } },
       "ollbanConfirmRequired"
     );
     return;
@@ -4270,7 +4802,7 @@ bot.onText(/^\/ollban(?:@\w+)?(?:\s+(\S+))?\s*$/i, async (msg, match) => {
   await sendMessageSafe(
     msg.chat.id,
     `🚫 Запускаю массовый бан известных пользователей: ${knownUserIds.size}.`,
-    { reply_to_message_id: msg.message_id },
+    { reply_parameters: { message_id: msg.message_id } },
     "ollbanStarted"
   );
 
@@ -4496,8 +5028,6 @@ bot.onText(/^([+-])\s*(?:топик|topic)$/i, async (msg, match) => {
   }
 });
 
-const TAG_ALL_DELAY_MS = 1200;
-
 function escapeHtmlText(text) {
   return String(text)
     .replace(/&/g, "&amp;")
@@ -4537,6 +5067,16 @@ async function sendTagMentionWithRetry(chatId, mentionHtml) {
 bot.onText(/^(?:\/tagall(?:@\w+)?|тег все|позвать всех)(?:\s+([\s\S]+))?$/i, async (msg, match) => {
   if (!await ensureGroupAdminCommand(msg, "tagall")) return;
 
+  if (tagCallController.has(msg.chat.id)) {
+    const current = tagCallController.get(msg.chat.id);
+    await sendMessageSafe(
+      msg.chat.id,
+      `📢 Вызов уже выполняется: ${current.called}/${current.total}. Используйте /tagpause или /tagstop.`,
+      { reply_parameters: { message_id: msg.message_id } }
+    );
+    return;
+  }
+
   const customText = (match[1] || "").trim();
   const knownUserIds = Array.from(new Set(getKnownChatUserIds(msg.chat.id).map(Number).filter(Number.isFinite)));
 
@@ -4549,21 +5089,83 @@ bot.onText(/^(?:\/tagall(?:@\w+)?|тег все|позвать всех)(?:\s+([
     return;
   }
 
-  await sendMessageSafe(
+  const progressMessage = await sendMessageSafe(
     msg.chat.id,
-    `📢 Зову всех участников (${candidates.length})${customText ? `:\n${customText}` : "."}`,
-    { reply_to_message_id: msg.message_id }
+    [
+      "📢 Вызов участников запущен",
+      `Вызвано: 0 из ${candidates.length}`,
+      `Статус: выполняется${customText ? `\n\n${customText}` : ""}`
+    ].join("\n"),
+    { reply_parameters: { message_id: msg.message_id } }
   );
 
-  let calledCount = 0;
+  const updateProgress = async (progress, force = false) => {
+    if (!progressMessage?.message_id || (!force && progress.processed % 5 !== 0)) return;
+    const status = progress.state === "stopped" ? "остановлен" :
+      progress.state === "paused" ? "приостановлен" :
+        progress.state === "completed" ? "завершён" : "выполняется";
+    try {
+      await bot.editMessageText(
+        [
+          "📢 Вызов участников",
+          `Вызвано: ${progress.called} из ${progress.total}`,
+          `Обработано: ${progress.processed} из ${progress.total}`,
+          `Статус: ${status}${customText ? `\n\n${customText}` : ""}`
+        ].join("\n"),
+        { chat_id: msg.chat.id, message_id: progressMessage.message_id }
+      );
+    } catch (error) {
+      const description = getErrorMessage(error);
+      if (!description.includes("message is not modified")) console.error("Tag all progress error:", description);
+    }
+  };
 
-  for (const profile of candidates) {
-    const ok = await sendTagMentionWithRetry(msg.chat.id, buildUserMentionHtml(profile));
-    if (ok) calledCount += 1;
-    await sleep(TAG_ALL_DELAY_MS);
+  const result = await tagCallController.start(
+    msg.chat.id,
+    candidates,
+    async (profile) => sendTagMentionWithRetry(msg.chat.id, buildUserMentionHtml(profile)),
+    updateProgress
+  );
+
+  if (!result.started) return;
+  await updateProgress(result, true);
+  addAdminLog(
+    msg.chat.id,
+    result.state === "stopped" ? "⏹ Остановил вызов участников" : "📢 Позвал всех участников",
+    msg.from,
+    "Вся группа",
+    `Вызвано: ${result.called}/${result.total}`
+  );
+});
+
+bot.onText(/^(?:\/tagpause(?:@\w+)?|пауза вызова)(?:\s|$)/i, async (msg) => {
+  if (!await ensureGroupAdminCommand(msg, "tagall")) return;
+  if (!tagCallController.pause(msg.chat.id)) {
+    await sendMessageSafe(msg.chat.id, "⏸ Активный вызов участников не найден или уже приостановлен.");
+    return;
   }
+  const progress = tagCallController.get(msg.chat.id);
+  await sendMessageSafe(msg.chat.id, `⏸ Вызов приостановлен. Обработано: ${progress.processed}/${progress.total}.`);
+});
 
-  addAdminLog(msg.chat.id, "📢 Позвал всех участников", msg.from, "Вся группа", `Вызвано: ${calledCount}/${candidates.length}`);
+bot.onText(/^(?:\/tagresume(?:@\w+)?|продолжить вызов)(?:\s|$)/i, async (msg) => {
+  if (!await ensureGroupAdminCommand(msg, "tagall")) return;
+  if (!tagCallController.resume(msg.chat.id)) {
+    await sendMessageSafe(msg.chat.id, "▶️ Приостановленный вызов участников не найден.");
+    return;
+  }
+  const progress = tagCallController.get(msg.chat.id);
+  await sendMessageSafe(msg.chat.id, `▶️ Вызов продолжен. Обработано: ${progress.processed}/${progress.total}.`);
+});
+
+bot.onText(/^(?:\/(?:tagstop|stopcall)(?:@\w+)?|остановить вызов)(?:\s|$)/i, async (msg) => {
+  if (!await ensureGroupAdminCommand(msg, "tagall")) return;
+  const progress = tagCallController.get(msg.chat.id);
+  if (!progress || !tagCallController.stop(msg.chat.id)) {
+    await sendMessageSafe(msg.chat.id, "⏹ Активный вызов участников не найден.");
+    return;
+  }
+  await sendMessageSafe(msg.chat.id, `⏹ Вызов остановлен. Обработано: ${progress.processed}/${progress.total}.`);
 });
 
 bot.onText(/^(?:\/admins(?:@\w+)?|админы)(?:\s|$)/i, async (msg) => {
@@ -4664,26 +5266,12 @@ bot.onText(/^(?:\/slowmode(?:@\w+)?|слоумод)(?:\s+(.+))?$/i, async (msg, 
     );
   }
 
-  let seconds = 0;
+  const seconds = value === "1h" ? 3600 : parseSlowModeDuration(value);
 
-  if (value === "0") {
-    seconds = 0;
-  } else if (value === "10s") {
-    seconds = 10;
-  } else if (value === "30s") {
-    seconds = 30;
-  } else if (value === "1m") {
-    seconds = 60;
-  } else if (value === "5m") {
-    seconds = 300;
-  } else if (value === "15m") {
-    seconds = 900;
-  } else if (value === "1h") {
-    seconds = 3600;
-  } else {
+  if (seconds === null) {
     return bot.sendMessage(
       msg.chat.id,
-      `⚠️ Telegram поддерживает только:
+      `⚠️ Поддерживаемые значения:
 
 0
 10s
@@ -4698,25 +5286,20 @@ bot.onText(/^(?:\/slowmode(?:@\w+)?|слоумод)(?:\s+(.+))?$/i, async (msg, 
     );
   }
 
-  const botCanChangeSlowMode = await canBotChangeSlowMode(msg.chat.id);
-
-  if (!botCanChangeSlowMode) {
+  if (seconds > 0 && !await canBotUsePermission(msg.chat.id, "can_delete_messages")) {
     return bot.sendMessage(
       msg.chat.id,
-      getBotPermissionText("изменить slowmode", "Блокировка пользователей / Ограничение участников")
+      getBotPermissionText("включить slowmode", "Удаление сообщений")
     );
   }
 
   try {
-    const permissions = await getChatPermissionsWithSlowMode(
-      msg.chat.id,
-      seconds
-    );
+    setSlowModeSetting(msg.chat.id, seconds);
+    const saved = getSlowModeSetting(msg.chat.id);
 
-    await bot.setChatPermissions(
-      msg.chat.id,
-      permissions
-    );
+    if ((seconds === 0 && saved !== null) || (seconds > 0 && saved?.seconds !== seconds)) {
+      throw new Error("Настройка slowmode не сохранилась в chat-settings.json");
+    }
 
     if (seconds === 0) {
       addAdminLog(
@@ -4742,7 +5325,7 @@ bot.onText(/^(?:\/slowmode(?:@\w+)?|слоумод)(?:\s+(.+))?$/i, async (msg, 
 
     bot.sendMessage(
       msg.chat.id,
-      `🐢 Slowmode установлен: ${value}`
+      `🐢 Slowmode установлен: ${formatSlowModeDuration(seconds)}`
     );
   } catch (error) {
     console.error("Slowmode error:", getErrorMessage(error));
@@ -4774,6 +5357,19 @@ bot.on("left_chat_member", async (msg) => {
   const key = `${msg.chat.id}:${leftUser.id}`;
   const now = Date.now();
   const timeLimitMs = setting.time * 1000;
+
+  userLeftEventCount += 1;
+  if (userLeftEventCount % 100 === 0 || userLeftHistory.size > 10000) {
+    for (const [historyKey, timestamps] of userLeftHistory) {
+      const historyChatId = Number(historyKey.split(":")[0]);
+      const historySetting = autoKickSettings.get(historyChatId);
+      const retentionMs = Math.max(1000, Number(historySetting?.time || 3600) * 1000);
+      const retained = timestamps.filter((timestamp) => now - timestamp <= retentionMs);
+      if (retained.length) userLeftHistory.set(historyKey, retained);
+      else userLeftHistory.delete(historyKey);
+    }
+    while (userLeftHistory.size > 10000) userLeftHistory.delete(userLeftHistory.keys().next().value);
+  }
 
   const history = (userLeftHistory.get(key) || []).filter((time) => now - time <= timeLimitMs);
   history.push(now);
@@ -5150,41 +5746,20 @@ bot.onText(/^(?:\/mute(?:@\w+)?|мут)(?:\s|$)/i, async (msg) => {
   const timerKey = `${msg.chat.id}:${targetProfile.id}`;
 
   try {
-    const restrictResult = await bot.restrictChatMember(msg.chat.id, targetProfile.id, {
-      until_date: untilDate,
-      permissions: getMutedPermissions()
-    });
-
-    if (restrictResult === false) {
-      throw createTelegramResultError("restrictChatMember", restrictResult);
-    }
-
-    if (muteTimers.has(timerKey)) {
-      clearTimeout(muteTimers.get(timerKey));
-    }
-
+    await applyMuteVerified(msg.chat.id, targetProfile.id, untilDate);
+    const muteRecord = {
+      chatId: msg.chat.id,
+      userId: targetProfile.id,
+      expiresAt: new Date(untilDate * 1000).toISOString(),
+      displayName: getUserDisplayName(targetProfile),
+      mutedBy: msg.from.id,
+      createdAt: new Date().toISOString()
+    };
+    activeMutes.set(timerKey, muteRecord);
+    saveChatSettings();
+    scheduleMuteExpiration(muteRecord);
     addAdminLog(msg.chat.id, "🔇 Замьютил", msg.from, getUserDisplayName(targetProfile), `Время: ${duration.label}`);
-    bot.sendMessage(msg.chat.id, `🔇 ${getUserDisplayName(targetProfile)} на mute на ${duration.label}`);
-
-    const timerMs = duration.seconds * 1000;
-
-    if (timerMs <= MAX_NODE_TIMER_MS) {
-      const timer = setTimeout(async () => {
-        try {
-          await bot.restrictChatMember(msg.chat.id, targetProfile.id, {
-            permissions: getFullPermissions()
-          });
-
-          muteTimers.delete(timerKey);
-          bot.sendMessage(msg.chat.id, `🔊 С пользователя ${getUserDisplayName(targetProfile)} снят mute, время закончилось.`);
-        } catch (error) {
-          muteTimers.delete(timerKey);
-          bot.sendMessage(msg.chat.id, getActionErrorText("автоматически снять мут", error));
-        }
-      }, timerMs);
-
-      muteTimers.set(timerKey, timer);
-    }
+    bot.sendMessage(msg.chat.id, `🔇 ${getUserDisplayName(targetProfile)} получил мут на ${duration.label}.\n✅ Ограничения подтверждены Telegram.`);
   } catch (error) {
     bot.sendMessage(
       msg.chat.id,
@@ -5213,21 +5788,15 @@ bot.onText(/^(?:\/unmute(?:@\w+)?|размут)(?:\s|$)/i, async (msg) => {
   }
 
   try {
-    const restrictResult = await bot.restrictChatMember(msg.chat.id, targetProfile.id, {
-      permissions: getFullPermissions()
-    });
-
-    if (restrictResult === false) {
-      throw createTelegramResultError("restrictChatMember", restrictResult);
+    const currentMember = await bot.getChatMember(msg.chat.id, targetProfile.id);
+    if (!activeMutes.has(timerKey) && !isMemberMuted(currentMember)) {
+      bot.sendMessage(msg.chat.id, "У пользователя нет активного мута.");
+      return;
     }
-
-    if (muteTimers.has(timerKey)) {
-      clearTimeout(muteTimers.get(timerKey));
-      muteTimers.delete(timerKey);
-    }
-
+    await liftMuteVerified(msg.chat.id, targetProfile.id);
+    clearMuteState(msg.chat.id, targetProfile.id);
     addAdminLog(msg.chat.id, "🔊 Снял мут", msg.from, getUserDisplayName(targetProfile));
-    bot.sendMessage(msg.chat.id, `🔊 С пользователя ${getUserDisplayName(targetProfile)} снят мут.`);
+    bot.sendMessage(msg.chat.id, `🔊 С пользователя ${getUserDisplayName(targetProfile)} снят мут.\n✅ Снятие подтверждено Telegram.`);
   } catch (error) {
     bot.sendMessage(msg.chat.id, getActionErrorText("снять мут", error));
   }
@@ -5587,19 +6156,19 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💔 В этом чате пока никто не женат.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
 
     const text = list
-      .map((marriage, index) => `${index + 1}. ${marriage.user1_name} 💍 ${marriage.user2_name}\n   Вместе: ${formatMarriageDuration(marriage.married_at)}`)
+      .map((marriage, index) => `${index + 1}. ${marriage.user1_name} 💍 ${marriage.user2_name}\n${formatMarriageDetails(marriage.married_at).split("\n").map((line) => `   ${line}`).join("\n")}`)
       .join("\n");
 
     bot.sendMessage(
       msg.chat.id,
       `💒 Браки в этом чате:\n\n${text}`,
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5611,7 +6180,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💞 Ответь на сообщение своей второй половинки и напиши: любовь",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5622,7 +6191,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💔 У тебя пока нет игровой семьи. Сначала заключи брак.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5631,7 +6200,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💞 Любовь можно отправить только своей второй половинке.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5642,7 +6211,16 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         `⏳ Семейную любовь уже начисляли недавно.\n\nПопробуйте снова через ${familySystem.formatRemainingTime(result.remainingMs)}.`,
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
+      );
+      return;
+    }
+
+    if (!result.ok && result.reason === "item_required") {
+      bot.sendMessage(
+        msg.chat.id,
+        `🔒 Для работы по этой профессии нужен актив: ${result.requiredItemName}. Категория пока недоступна для использования.`,
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5657,7 +6235,7 @@ bot.on("message", async (msg) => {
         `🏡 Уровень семьи: ${result.family.level}`,
         result.leveledUp ? "🎉 Семья получила новый уровень!" : ""
       ].filter(Boolean).join("\n"),
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5671,7 +6249,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💔 У тебя пока нет игровой семьи. Напиши брак ответом на сообщение участника.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5699,7 +6277,7 @@ bot.on("message", async (msg) => {
         `• ${firstName}: ${familySystem.getProfessionName(firstCareer.profession)} ур. ${firstCareer.level}`,
         `• ${partnerName}: ${familySystem.getProfessionName(partnerCareer.profession)} ур. ${partnerCareer.level}`
       ].join("\n"),
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5723,7 +6301,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💔 Чтобы работать и пополнять семейный баланс, сначала заключи игровой брак.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5732,7 +6310,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💼 У тебя пока нет профессии.\n\nНапиши: профессии\nЗатем выбери: сменить профессию курьер",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5741,7 +6319,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         `⏳ Ты уже работал(а) недавно.\n\nСледующая смена через ${familySystem.formatRemainingTime(result.remainingMs)}.`,
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5755,7 +6333,7 @@ bot.on("message", async (msg) => {
         `⭐ +${result.xpGain} опыта карьеры (Уровень ${result.career.level}, до след. уровня: ${xpLeft} XP)`,
         result.leveledUp ? "🎉 Карьерный уровень повышен!" : ""
       ].filter(Boolean).join("\n"),
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5788,7 +6366,7 @@ bot.on("message", async (msg) => {
         "",
         "🔁 Смена: сменить профессию курьер"
       ].join("\n"),
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5806,7 +6384,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "⚠️ Профессия не найдена.\n\nНапиши: профессии",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5815,7 +6393,16 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         `🔒 ${result.professionName} пока недоступен.\n\nНужен карьерный уровень: ${result.requiredLevel}\nТвой уровень: ${result.career.level}`,
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
+      );
+      return;
+    }
+
+    if (!result.ok && result.reason === "item_required") {
+      bot.sendMessage(
+        msg.chat.id,
+        `🔒 ${result.professionName} пока недоступен. Нужен актив: ${result.requiredItemName}.`,
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5823,7 +6410,7 @@ bot.on("message", async (msg) => {
     bot.sendMessage(
       msg.chat.id,
       `✅ Профессия изменена: ${result.professionName}.\n\nТеперь можно написать: работать`,
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5838,7 +6425,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         RP_REPLY_HINT,
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5856,7 +6443,7 @@ bot.on("message", async (msg) => {
     bot.sendMessage(
       msg.chat.id,
       `🧾 ID сообщения: ${targetMessageId}`,
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5889,7 +6476,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "🏆 Пока не из кого выбрать лучшего. Пусть участники напишут пару сообщений в группе.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5897,7 +6484,7 @@ bot.on("message", async (msg) => {
     bot.sendMessage(
       msg.chat.id,
       `🏆 Лучший сегодня: ${getUserDisplayName(bestUser)}`,
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5911,7 +6498,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "Пока не знаю участников этого чата. Пусть участники напишут пару сообщений, и я смогу выбрать.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5919,7 +6506,7 @@ bot.on("message", async (msg) => {
     bot.sendMessage(
       msg.chat.id,
       `${getUserDisplayName(randomUser)} — ${slivkiWhoSubject}`,
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
@@ -5938,7 +6525,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         `💍 ${userName} уже состоит в игровом браке.\n\n💞 Вторая половинка: ${currentPartnerName}\n\nЧтобы отменить: напиши "развод" или /razvod`,
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5966,7 +6553,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💍 Укажи конкретного пользователя: ответь командой на его сообщение или напиши брак @username.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5975,7 +6562,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💍 Самого себя выбрать нельзя.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5986,7 +6573,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💍 Ботов нельзя выбирать для брака.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -5995,7 +6582,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         `💍 ${partnerName} уже состоит в игровом браке.`,
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -6007,7 +6594,7 @@ bot.on("message", async (msg) => {
       msg.chat.id,
       getMarriageProposalText(userName, partnerName, loveQuote),
       {
-        reply_to_message_id: msg.message_id,
+        reply_parameters: { message_id: msg.message_id },
         reply_markup: {
           inline_keyboard: [
             [
@@ -6031,7 +6618,7 @@ bot.on("message", async (msg) => {
       bot.sendMessage(
         msg.chat.id,
         "💔 У тебя пока нет игрового брака.",
-        { reply_to_message_id: msg.message_id }
+        { reply_parameters: { message_id: msg.message_id } }
       );
       return;
     }
@@ -6042,17 +6629,35 @@ bot.on("message", async (msg) => {
     bot.sendMessage(
       msg.chat.id,
       `💔 Игровой брак расторгнут.\n\n${getMarriageDisplayName(msg.from)} и ${partnerName} больше не вместе.`,
-      { reply_to_message_id: msg.message_id }
+      { reply_parameters: { message_id: msg.message_id } }
     );
     return;
   }
 });
 
+restoreActiveMutes().catch((error) => {
+  console.error("Mute recovery error:", getErrorMessage(error));
+});
+restoreQuizTimers();
+
+function stopBot(signal) {
+  tagCallController.stopAll();
+  deferredJsonWriter.flushAll();
+  return bot.stopPolling({ cancel: true, reason: signal });
+}
+
+process.once("SIGINT", () => stopBot("SIGINT"));
+process.once("SIGTERM", () => stopBot("SIGTERM"));
+
 bot.on("message", async (msg) => {
   if (!isPrivateChat(msg)) return;
   if (!msg.text) return;
   if (msg.text.startsWith("/")) return;
-  if (!supportUsers.has(msg.from.id)) return;
+  const supportExpiresAt = supportUsers.get(msg.from.id);
+  if (!supportExpiresAt || supportExpiresAt <= Date.now()) {
+    supportUsers.delete(msg.from.id);
+    return;
+  }
 
   supportUsers.delete(msg.from.id);
 
@@ -6083,7 +6688,7 @@ bot.on("message", async (msg) => {
   bot.sendMessage(
     msg.chat.id,
     UNKNOWN_COMMAND_TEXT,
-    { reply_to_message_id: msg.message_id }
+    { reply_parameters: { message_id: msg.message_id } }
   ).catch((error) => {
     console.error("Unknown command fallback error:", getErrorMessage(error));
   });

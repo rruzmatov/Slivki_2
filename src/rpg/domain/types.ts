@@ -1,24 +1,96 @@
+import type { InventoryEntryId, LocationRef, RequirementExpression } from "./assets";
+import type { InventoryLifecycleStatus } from "./inventory";
+
+export * from "./assets";
+export * from "./events";
+export * from "./inventory";
+export * from "./ownership";
+export * from "./ownership-permissions";
+export * from "./runtime";
+export * from "./shop";
+export * from "./transport";
+export * from "./transport-condition";
+export * from "./transport-domain-validation";
+export * from "./transport-eligibility";
+export * from "./transport-errors";
+export * from "./transport-maintenance";
+export * from "./transport-mileage";
+export * from "./transport-pricing";
+export * from "./transport-registry";
+export * from "./transport-repair";
+export * from "./transport-state-machine";
+export * from "./transport-usage";
+export * from "./transport-vehicle";
+export * from "./unlocks";
+
 export type EntityId = string;
 export type TelegramUserId = number;
 export type ISODateTime = string;
 
-export type ItemCategory =
+export type KnownItemCategory =
   | "home"
   | "bicycle"
   | "scooter"
   | "motorcycle"
   | "car"
+  | "truck"
+  | "ship"
   | "airplane"
   | "helicopter"
   | "yacht"
+  | "business"
   | "pet"
   | "gift"
   | "jewelry"
   | "interior"
   | "ticket";
 
+export type ItemCategory = KnownItemCategory | (string & {});
+
 export type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic";
-export type TransportKind = "walk" | "bicycle" | "scooter" | "motorcycle" | "car" | "airplane" | "helicopter" | "yacht";
+export type AssetCondition = "new" | "good" | "worn" | "broken";
+export type TransportKind =
+  | "walk"
+  | "bicycle"
+  | "scooter"
+  | "motorcycle"
+  | "car"
+  | "truck"
+  | "ship"
+  | "airplane"
+  | "helicopter"
+  | "yacht";
+
+export type FuelType = "none" | "human" | "petrol" | "diesel" | "electric" | "hybrid" | "jet_fuel" | "marine_diesel";
+export type LicenseType = "none" | "bicycle" | "motorcycle" | "car" | "truck" | "pilot" | "captain";
+
+export interface TransportSpec {
+  brand: string;
+  model: string;
+  country: string;
+  year: number;
+  horsepower: number;
+  topSpeedKmh: number;
+  fuelType: FuelType;
+  maintenanceCost: number;
+  insuranceCost: number;
+  canWork: boolean;
+  unlockedJobs: EntityId[];
+  resalePrice: number;
+  repairCost: number;
+  requiredLicense: LicenseType;
+  upgradeSupport: boolean;
+  weightKg?: number;
+  description?: string;
+  defaultCondition?: AssetCondition;
+  canSell?: boolean;
+  canRepair?: boolean;
+  passengerCapacity?: number;
+  rangeKm?: number;
+  dockRequirement?: string;
+  airportRequirement?: string;
+  businessUsage?: EntityId[];
+}
 
 export interface Requirement {
   level?: number;
@@ -26,6 +98,7 @@ export interface Requirement {
   itemId?: EntityId;
   balance?: number;
   familyLevel?: number;
+  expression?: RequirementExpression;
 }
 
 export interface CatalogItem {
@@ -36,6 +109,7 @@ export interface CatalogItem {
   level: number;
   rarity?: Rarity;
   transportKind?: TransportKind;
+  transport?: TransportSpec;
   assetValue: number;
   requirements?: Requirement[];
   metadata?: Record<string, string | number | boolean>;
@@ -69,10 +143,52 @@ export interface TravelLocation {
   requirements: Requirement[];
 }
 
+export interface RepairHistoryEntry {
+  repairedAt: ISODateTime;
+  cost: number;
+  conditionBefore: AssetCondition;
+  wearBefore: number;
+  conditionAfter: AssetCondition;
+  wearAfter: number;
+}
+
+export interface UpgradeHistoryEntry {
+  upgradedAt: ISODateTime;
+  upgradeId: EntityId;
+  cost: number;
+  note: string;
+}
+
 export interface InventoryEntry {
+  instanceId: InventoryEntryId;
   itemId: EntityId;
   quantity: number;
-  acquiredAt: string;
+  reservedQuantity?: number;
+  acquiredAt: ISODateTime;
+  acquiredBy: "purchase" | "gift" | "admin" | "reward" | "migration";
+  sourceId?: EntityId;
+  condition?: AssetCondition;
+  currentValue?: number;
+  purchasePrice?: number;
+  wearLevel?: number;
+  durability?: {
+    current: number;
+    maximum: number;
+  };
+  repairHistory?: RepairHistoryEntry[];
+  upgradeHistory?: UpgradeHistoryEntry[];
+  origin?: {
+    type: string;
+    referenceId?: string;
+  };
+  location?: LocationRef;
+  lifecycleStatus?: InventoryLifecycleStatus;
+  state?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  rootInstanceId?: InventoryEntryId;
+  parentInstanceId?: InventoryEntryId;
+  version?: number;
+  updatedAt?: ISODateTime;
 }
 
 export interface PlayerProfile {
@@ -80,6 +196,8 @@ export interface PlayerProfile {
   username?: string;
   firstName: string;
   balance: number;
+  bankBalance: number;
+  country: string;
   level: number;
   xp: number;
   energy: number;
@@ -90,16 +208,17 @@ export interface PlayerProfile {
   skills: Record<string, number>;
   transportIds: EntityId[];
   homeIds: EntityId[];
+  businessIds: EntityId[];
   petIds: EntityId[];
   settings: {
     blocked: boolean;
     locale: "ru";
     notifications: boolean;
   };
-  dailyRewardClaimedAt?: string;
-  lastWorkedAt?: string;
-  createdAt: string;
-  updatedAt: string;
+  dailyRewardClaimedAt?: ISODateTime;
+  lastWorkedAt?: ISODateTime;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
 }
 
 export interface Family {
@@ -121,9 +240,9 @@ export interface Family {
     totalEarned: number;
     totalSpent: number;
   };
-  weddingDate: string;
-  createdAt: string;
-  updatedAt: string;
+  weddingDate: ISODateTime;
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
 }
 
 export interface Quest {
@@ -140,8 +259,8 @@ export interface MarriageProposal {
   proposerId: TelegramUserId;
   targetId: TelegramUserId;
   chatId: number;
-  expiresAt: string;
-  createdAt: string;
+  expiresAt: ISODateTime;
+  createdAt: ISODateTime;
 }
 
 export interface EconomyLedgerEntry {
@@ -150,7 +269,14 @@ export interface EconomyLedgerEntry {
   familyId?: EntityId;
   amount: number;
   reason: string;
-  createdAt: string;
+  currency?: string;
+  accountKind?: "player_cash" | "player_bank" | "family_capital";
+  referenceType?: string;
+  referenceId?: EntityId;
+  idempotencyKey?: string;
+  correlationId?: string;
+  balanceAfter?: number;
+  createdAt: ISODateTime;
 }
 
 export interface AppLog {
@@ -158,24 +284,7 @@ export interface AppLog {
   level: "info" | "warn" | "error";
   message: string;
   meta?: Record<string, unknown>;
-  createdAt: string;
-}
-
-export interface GameState {
-  players: Record<string, PlayerProfile>;
-  families: Record<EntityId, Family>;
-  marriageProposals: Record<EntityId, MarriageProposal>;
-  ledger: EconomyLedgerEntry[];
-  logs: AppLog[];
-  stats: {
-    commandsHandled: number;
-    purchases: number;
-    marriages: number;
-    jobsCompleted: number;
-    travels: number;
-    dailyRewards: number;
-    adminActions: number;
-  };
+  createdAt: ISODateTime;
 }
 
 export interface Repository<T, ID extends string | number> {

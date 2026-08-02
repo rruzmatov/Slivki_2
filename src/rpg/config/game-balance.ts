@@ -1,6 +1,6 @@
 export const GAME_BALANCE = {
   player: {
-    startingBalance: 500,
+    startingBalance: 0,
     startingEnergy: 100,
     maxEnergy: 100,
     xpBase: 100,
@@ -27,4 +27,4 @@ export const GAME_BALANCE = {
 } as const;
 
 export const xpForLevel = (level: number): number =>
-  Math.floor(GAME_BALANCE.player.xpBase * Math.pow(GAME_BALANCE.player.xpGrowth, Math.max(0, level - 1)));
+  Math.floor(GAME_BALANCE.player.xpBase * GAME_BALANCE.player.xpGrowth ** Math.max(0, level - 1));

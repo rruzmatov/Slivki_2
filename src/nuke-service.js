@@ -151,7 +151,7 @@ class NukeService {
     }
 
     await this.bot.sendMessage(msg.chat.id, this.getWarningText(), {
-      reply_to_message_id: msg.message_id
+      reply_parameters: { message_id: msg.message_id }
     });
   }
 
@@ -167,13 +167,13 @@ class NukeService {
 
     if (!validation.ok) {
       await this.bot.sendMessage(msg.chat.id, validation.message, {
-        reply_to_message_id: msg.message_id
+        reply_parameters: { message_id: msg.message_id }
       });
       return;
     }
 
     const progressMessage = await this.bot.sendMessage(msg.chat.id, "☢️ Запускаю NUKE...", {
-      reply_to_message_id: msg.message_id
+      reply_parameters: { message_id: msg.message_id }
     });
 
     await this.run({

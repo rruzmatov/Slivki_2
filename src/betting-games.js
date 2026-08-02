@@ -8,9 +8,9 @@ function parseBet(value) {
   return amount;
 }
 
-function playDice() {
-  const roll = Math.floor(Math.random() * 6) + 1;
-  const won = roll >= 4;
+function playDice(random = secureRandomInt) {
+  const won = random(2) === 1;
+  const roll = (won ? 4 : 1) + random(3);
 
   return {
     roll,
@@ -21,22 +21,32 @@ function playDice() {
 
 const CASINO_SYMBOLS = ["🍒", "🍋", "🔔", "⭐", "7️⃣"];
 
-function playCasino() {
-  const slots = Array.from({ length: 3 }, () => CASINO_SYMBOLS[Math.floor(Math.random() * CASINO_SYMBOLS.length)]);
-  const counts = new Map();
-
-  for (const slot of slots) {
-    counts.set(slot, (counts.get(slot) || 0) + 1);
-  }
-
-  const maxMatches = Math.max(...counts.values());
-  const multiplier = maxMatches === 3 ? 5 : maxMatches === 2 ? 1.5 : 0;
+function playCasino(random = secureRandomInt) {
+  const won = random(2) === 1;
+  const slots = won ? createWinningSlots(random) : createLosingSlots(random);
+  const multiplier = won ? 2 : 0;
 
   return {
     slots,
     multiplier,
-    won: multiplier > 0
+    won
   };
+}
+
+function createWinningSlots(random) {
+  const symbol = CASINO_SYMBOLS[random(CASINO_SYMBOLS.length)];
+  return [symbol, symbol, symbol];
+}
+
+function createLosingSlots(random) {
+  const pool = [...CASINO_SYMBOLS];
+  const result = [];
+  while (result.length < 3) result.push(pool.splice(random(pool.length), 1)[0]);
+  return result;
+}
+
+function secureRandomInt(maxExclusive) {
+  return randomInt(0, maxExclusive);
 }
 
 module.exports = {
@@ -44,3 +54,4 @@ module.exports = {
   playDice,
   playCasino
 };
+const { randomInt } = require("node:crypto");
