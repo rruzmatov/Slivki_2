@@ -50,13 +50,43 @@ test("production JavaScript has no circular local dependencies", () => {
 
 test("stability commands, aliases and callback fallback are registered", () => {
   for (const token of [
-    "tg-admin", "untg-admin", "tagpause", "tagresume", "tagstop", "stopcall",
+    "tg-admin", "untg-admin", "promote", "demote", "tagpause", "tagresume", "tagstop", "stopcall",
     "quizstats", "diagnostics", "reportbug", "Эта кнопка устарела"
   ]) {
     assert.ok(source.includes(token), `missing Telegram route: ${token}`);
   }
   assert.match(source, /bot\.onText\s*=.*=>/s);
   assert.match(source, /processedCallbackQueries/);
+});
+
+test("Telegram admin commands remain reply-only with all legacy aliases", () => {
+  const handler = source.match(/bot\.onText\(\/\^\(\?:\(\?:сетка[\s\S]*?\n\}\);/)?.[0] || "";
+  assert.ok(handler, "Telegram admin handler not found");
+  for (const token of ["тг\\s*админ", "tg\\s*admin", "tg-admin", "untg-admin", "promote", "demote"]) {
+    assert.ok(handler.includes(token), `missing Telegram admin alias: ${token}`);
+  }
+  assert.ok(handler.includes("msg.reply_to_message?.from"));
+  assert.ok(handler.includes("Ответьте этой командой на сообщение участника."));
+  assert.doesNotMatch(handler, /resolveTargetIdentity|chatInfo\.keys|setChatAdministratorCustomTitle/);
+
+  const patternLiteral = handler.match(/bot\.onText\((\/\^.*\/i),/)?.[1];
+  assert.ok(patternLiteral, "Telegram admin command pattern not found");
+  const pattern = Function(`"use strict"; return ${patternLiteral};`)();
+  for (const command of [
+    "+ тг админ",
+    "- тг админ",
+    "+tg admin",
+    "-tg admin",
+    "tg-admin",
+    "untg-admin",
+    "/tg-admin",
+    "/untg-admin",
+    "/promote",
+    "/demote",
+    "сетка +тг админ"
+  ]) {
+    assert.match(command, pattern, command);
+  }
 });
 
 test("published Telegram command metadata is valid", () => {

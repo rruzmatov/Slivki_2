@@ -1,3 +1,5 @@
+const { buildAdminDemotionRights, isDemotionApplied } = require("./telegram-moderation");
+
 const NUKE_CONFIRM_TEXT = "CONFIRM";
 const NUKE_CALLBACK_PREFIX = "nuke:";
 const NUKE_DELAY_MIN_MS = 300;
@@ -394,21 +396,14 @@ class NukeService {
   }
 
   async demoteAdmin(chatId, userId) {
-    const result = await this.bot.promoteChatMember(chatId, userId, {
-      can_manage_chat: false,
-      can_delete_messages: false,
-      can_restrict_members: false,
-      can_invite_users: false,
-      can_pin_messages: false,
-      can_manage_topics: false,
-      can_promote_members: false,
-      can_change_info: false,
-      can_manage_video_chats: false
-    });
+    const chat = await this.bot.getChat(chatId);
+    const result = await this.bot.promoteChatMember(chatId, userId, buildAdminDemotionRights(chat));
 
-    if (result === false) {
+    if (result !== true) {
       throw new Error("Telegram API не подтвердил снятие администратора");
     }
+    const member = await this.bot.getChatMember(chatId, userId);
+    if (!isDemotionApplied(member)) throw new Error("Telegram не применил снятие администратора");
   }
 
   async banUser(chatId, userId) {

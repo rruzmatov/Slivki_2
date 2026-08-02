@@ -27,16 +27,17 @@ const {
   inspectStorage
 } = require("./diagnostics");
 const {
-  ADMIN_DEMOTION_RIGHTS,
-  ADMIN_PROMOTION_RIGHTS,
+  TelegramAdminOperationError,
+  changeTelegramAdmin,
   describeMemberRestrictions,
+  getBotAdminCapabilities,
+  getForbiddenRight,
   getFullPermissions,
   getMutedPermissions,
-  isDemotionApplied,
   isMemberMuted,
   isMuteApplied,
   isMuteLifted,
-  isPromotionApplied
+  isRightForbidden
 } = require("./telegram-moderation");
 
 const botToken = process.env.BOT_TOKEN;
@@ -2929,68 +2930,6 @@ async function ensureModeratableTarget(msg, targetProfile, actionText) {
   return null;
 }
 
-async function getBotMemberWithPermission(chatId, permission) {
-  const me = await getBotIdentity();
-  const member = await bot.getChatMember(chatId, me.id);
-  if (!hasBotAdminPermission(member, permission)) {
-    throw new Error(`У бота нет права ${permission}; status=${member.status}`);
-  }
-  return member;
-}
-
-async function changeTelegramAdminVerified(chatId, targetUserId, promote, title = "") {
-  await getBotMemberWithPermission(chatId, "can_promote_members");
-  const before = await bot.getChatMember(chatId, targetUserId);
-  if (before.status === "creator") {
-    throw new Error("Владелец чата имеет неизменяемый статус creator");
-  }
-  if (before.user?.is_bot && Number(before.user.id) === Number(botId)) {
-    throw new Error("Бот не может изменять собственные права администратора");
-  }
-  if (promote && before.status === "administrator" && isPromotionApplied(before)) {
-    return { changed: false, reason: "Пользователь уже является администратором с запрошенными правами", member: before };
-  }
-  if (!promote && before.status !== "administrator") {
-    return { changed: false, reason: "У пользователя нет активного статуса администратора", member: before };
-  }
-  if (before.status === "administrator" && before.can_be_edited !== true) {
-    throw new Error("Telegram пометил администратора как can_be_edited=false; бот не может изменить его права");
-  }
-
-  const apiResult = await bot.promoteChatMember(
-    chatId,
-    targetUserId,
-    promote ? ADMIN_PROMOTION_RIGHTS : ADMIN_DEMOTION_RIGHTS
-  );
-  if (apiResult !== true) throw createTelegramResultError("promoteChatMember", apiResult);
-  await sleep(MUTE_VERIFY_DELAY_MS);
-  let after = await bot.getChatMember(chatId, targetUserId);
-  const applied = promote ? isPromotionApplied(after) : isDemotionApplied(after);
-  if (!applied) {
-    throw createTelegramResultError("promoteChatMember verification", {
-      requested: promote ? "administrator" : "member",
-      actualStatus: after.status,
-      canBeEdited: after.can_be_edited
-    });
-  }
-
-  let titleWarning = "";
-  if (promote && title) {
-    try {
-      const titleResult = await bot.setChatAdministratorCustomTitle(chatId, targetUserId, title.slice(0, 16));
-      if (titleResult !== true) throw createTelegramResultError("setChatAdministratorCustomTitle", titleResult);
-      await sleep(MUTE_VERIFY_DELAY_MS);
-      after = await bot.getChatMember(chatId, targetUserId);
-      if (after.custom_title !== title.slice(0, 16)) {
-        throw createTelegramResultError("custom title verification", { actualTitle: after.custom_title || null });
-      }
-    } catch (error) {
-      titleWarning = `Администратор назначен, но должность не установлена: ${getTelegramFailureReason(error)}`;
-    }
-  }
-  return { changed: true, member: after, titleWarning };
-}
-
 async function applyMuteVerified(chatId, userId, untilDate) {
   const result = await bot.restrictChatMember(chatId, userId, getMutedPermissions(), {
     until_date: untilDate,
@@ -3754,12 +3693,18 @@ async function collectDiagnostics(msg) {
       try {
         const member = await bot.getChatMember(msg.chat.id, me.id);
         const isAdmin = member.status === "administrator" || member.status === "creator";
-        const rights = ["can_restrict_members", "can_promote_members", "can_delete_messages"]
-          .filter((right) => member[right] === true);
+        const capabilities = getBotAdminCapabilities(member, msg.chat);
         checks.push(diagnosticCheck(
           "Permissions",
           isAdmin,
-          isAdmin ? `status=${member.status}; права=${rights.join(", ") || "базовые"}` : `status=${member.status}; административные команды недоступны`,
+          isAdmin
+            ? [
+              `status=${capabilities.status}`,
+              `can_promote_members=${capabilities.canPromoteMembers}`,
+              `chat_type=${capabilities.chatType}`,
+              `выдаваемые права=${capabilities.safeGrantableRights.join(", ") || "нет"}`
+            ].join("; ")
+            : `status=${member.status}; chat_type=${msg.chat.type}; административные команды недоступны`,
           isAdmin ? "ok" : "warning"
         ));
       } catch (error) {
@@ -4675,70 +4620,87 @@ bot.onText(/^\/resetlinks(?:@\w+)?$/i, async (msg) => {
   }
 });
 
-bot.onText(/^(?:(?:сетка\s+)?([+-])\s*тг\s+админ|\/(tg-admin|tg_admin|untg-admin|untg_admin)(?:@\w+)?)(?:\s+(.+))?$/i, async (msg, match) => {
+bot.onText(/^(?:(?:сетка\s+)?([+-])\s*(?:тг\s*админ|tg\s*admin)|\/?(tg-admin|tg_admin|untg-admin|untg_admin|promote|demote)(?:@\w+)?)\s*$/i, async (msg, match) => {
   registerUserInChat(msg);
   if (!ensureCommandEnabled(msg, "tgadmin")) return;
 
-  if (!isOwner(msg.from.id)) {
-    bot.sendMessage(msg.chat.id, "⛔ Эту команду может использовать только владелец бота.");
+  if (msg.chat.type !== "group" && msg.chat.type !== "supergroup") {
+    await bot.sendMessage(msg.chat.id, "⚠️ Команда работает только в группах и супергруппах.");
     return;
   }
 
-  const sign = match[1] || (String(match[2]).toLowerCase().startsWith("untg") ? "-" : "+");
-  const args = (match[3] || "").trim();
-  const target = resolveTargetIdentity(msg, args);
-
-  if (!target) {
-    bot.sendMessage(
-      msg.chat.id,
-      "👮 Укажи пользователя ответом на сообщение, через @username или ID.\n\nПример:\n+тг админ @username\n-тг админ 123456789"
-    );
+  const repliedUser = msg.reply_to_message?.from;
+  if (!repliedUser?.id) {
+    await bot.sendMessage(msg.chat.id, "Ответьте этой командой на сообщение участника.");
     return;
   }
 
-  const targetToken = target.token;
-  const title = args
-    .split(/\s+/)
-    .filter((part) => part && part !== targetToken)
-    .join(" ")
-    .trim();
-
-  const chatIds = isPrivateChat(msg) ? Array.from(chatInfo.keys()) : [msg.chat.id];
-  let successCount = 0;
-  const failed = [];
-
-  for (const chatId of chatIds) {
-    try {
-      const change = await changeTelegramAdminVerified(chatId, target.userId, sign === "+", title);
-      if (!change.changed) {
-        failed.push(`${getChatTitle(chatId)} — ${change.reason}`);
-        continue;
-      }
-      if (sign === "+") {
-        addAdminLog(chatId, "👮 Выдал тг админа", msg.from, target.displayName, title ? `Должность: ${title}` : "");
-      } else {
-        addAdminLog(chatId, "👮 Снял тг админа", msg.from, target.displayName);
-      }
-      if (change.titleWarning) failed.push(`${getChatTitle(chatId)} — ${change.titleWarning}`);
-      successCount += 1;
-    } catch (error) {
-      failed.push(`${getChatTitle(chatId)} — ${getTelegramFailureReason(error)}`);
+  const alias = String(match[2] || "").toLowerCase();
+  const promote = match[1] ? match[1] === "+" : !alias.startsWith("untg") && alias !== "demote";
+  try {
+    const me = await getBotIdentity();
+    const change = await changeTelegramAdmin({
+      bot,
+      chat: msg.chat,
+      actorId: msg.from.id,
+      targetId: repliedUser.id,
+      botId: me.id,
+      ownerIds,
+      promote
+    });
+    if (!change.changed) {
+      await bot.sendMessage(msg.chat.id, change.message);
+      return;
     }
+
+    addAdminLog(
+      msg.chat.id,
+      promote ? "👮 Выдал тг админа" : "👮 Снял тг админа",
+      msg.from,
+      getMarriageDisplayName(repliedUser)
+    );
+    await bot.sendMessage(msg.chat.id, [
+      `${promote ? "👮" : "👤"} Результат ${promote ? "выдачи админки" : "снятия админки"}:`,
+      "",
+      "✅ Успешно: 1",
+      "⚠️ Ошибок: 0",
+      "",
+      change.message
+    ].join("\n"));
+  } catch (error) {
+    const details = error instanceof TelegramAdminOperationError ? error.details : {};
+    const correlationId = recordRuntimeError("telegram.admin_promotion", error, {
+      chatId: msg.chat.id,
+      chatType: msg.chat.type,
+      actorId: msg.from.id,
+      targetId: repliedUser.id,
+      promote,
+      requestedRights: details.requestedRights || null,
+      capabilities: details.capabilities || null,
+      telegram: details.telegram || null
+    });
+    console.error(`Telegram admin operation error (${correlationId}):`, getErrorMessage(error));
+
+    if (error.code === "RIGHT_FORBIDDEN" || isRightForbidden(error)) {
+      const forbiddenRight = getForbiddenRight(error);
+      const lines = [
+        `❌ Не удалось ${promote ? "назначить администратора" : "снять права администратора"}.`,
+        "Telegram отклонил одно из запрошенных прав.",
+        "Проверьте:",
+        "• бот является администратором;",
+        "• у бота включено «Назначение администраторов»;",
+        "• бот выдаёт только те права, которыми обладает сам."
+      ];
+      if (forbiddenRight) lines.push(`Конфликтующее право: ${forbiddenRight}`);
+      lines.push(`Код диагностики: ${correlationId}`);
+      await bot.sendMessage(msg.chat.id, lines.join("\n"));
+      return;
+    }
+    await bot.sendMessage(
+      msg.chat.id,
+      `${error.userMessage || getTelegramFailureReason(error)}\nКод диагностики: ${correlationId}`
+    );
   }
-
-  const actionText = sign === "+" ? "выдачи админки" : "снятия админки";
-  const result = [
-    `👮 Результат ${actionText}:`,
-    "",
-    `✅ Успешно: ${successCount}`,
-    `⚠️ Ошибок: ${failed.length}`
-  ];
-
-  if (failed.length > 0) {
-    result.push("", failed.slice(0, 8).join("\n"));
-  }
-
-  bot.sendMessage(msg.chat.id, result.join("\n"));
 });
 
 bot.onText(/^\/(partner|партнер)(?:@\w+)?(?:\s|$)/i, (msg) => {
