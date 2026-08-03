@@ -84,6 +84,19 @@ test("main polling bot registers /pay for reply, username and known Telegram ID"
   assert.doesNotMatch(handler, /isPrivateChat|rpg|inventory|transport|family/i);
 });
 
+test("production marriage list uses the shared HTML formatter without wedding date details", () => {
+  const start = source.indexOf("if (/^браки$/i.test(msg.text.trim()))");
+  const end = source.indexOf("if (/^любовь$/i.test(msg.text.trim()))", start);
+  const handler = start >= 0 && end > start ? source.slice(start, end) : "";
+  assert.ok(handler, "marriage list handler not found");
+  assert.match(handler, /formatMarriageListMessages\(list,/);
+  assert.match(handler, /escapeHtml: escapeHtmlText/);
+  assert.match(handler, /parse_mode: "HTML"/);
+  assert.match(handler, /recordRuntimeError\("marriage\.list_format"/);
+  assert.match(handler, /await sendMessageSafe\(msg\.chat\.id, text, options, "marriageList"\)/);
+  assert.doesNotMatch(handler, /formatMarriageDetails|Дата свадьбы|До годовщины/);
+});
+
 test("Telegram admin commands remain reply-only with all legacy aliases", () => {
   const handler = source.match(/bot\.onText\(\/\^\(\?:\(\?:сетка[\s\S]*?\n\}\);/)?.[0] || "";
   assert.ok(handler, "Telegram admin handler not found");

@@ -13,7 +13,7 @@ const { OwnerEconomyCommandService, parseOwnerCoinGrant } = require("./owner-eco
 const { PaymentError, PaymentService, parsePayCommand } = require("./payment-service");
 const { parseBet, playDice, playCasino } = require("./betting-games");
 const { CATEGORY_LABELS, DIFFICULTY_LABELS, QuizManager, QUIZ_REWARD } = require("./quiz");
-const { formatMarriageDetails } = require("./marriage-time");
+const { formatMarriageDetails, formatMarriageListMessages } = require("./marriage-time");
 const { RpPresentationSelector, buildRpText } = require("./rp-presentation");
 const { TagCallController } = require("./tag-call-controller");
 const { DeferredJsonWriter } = require("./deferred-json-writer");
@@ -6233,15 +6233,23 @@ bot.on("message", async (msg) => {
       return;
     }
 
-    const text = list
-      .map((marriage, index) => `${index + 1}. ${marriage.user1_name} 💍 ${marriage.user2_name}\n${formatMarriageDetails(marriage.married_at).split("\n").map((line) => `   ${line}`).join("\n")}`)
-      .join("\n");
+    const messages = formatMarriageListMessages(list, {
+      escapeHtml: escapeHtmlText,
+      onDiagnostic: (diagnostic) => {
+        const error = new Error(`Marriage list formatting diagnostic: ${diagnostic.code}`);
+        const correlationId = recordRuntimeError("marriage.list_format", error, {
+          chatId: msg.chat.id,
+          ...diagnostic
+        });
+        console.error(`Marriage list formatting error (${correlationId}):`, error.message);
+      }
+    });
 
-    bot.sendMessage(
-      msg.chat.id,
-      `💒 Браки в этом чате:\n\n${text}`,
-      { reply_parameters: { message_id: msg.message_id } }
-    );
+    for (const [index, text] of messages.entries()) {
+      const options = { parse_mode: "HTML" };
+      if (index === 0) options.reply_parameters = { message_id: msg.message_id };
+      await sendMessageSafe(msg.chat.id, text, options, "marriageList");
+    }
     return;
   }
 
