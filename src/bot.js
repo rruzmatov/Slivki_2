@@ -14,6 +14,7 @@ const { PaymentError, PaymentService, parsePayCommand } = require("./payment-ser
 const { parseBet, playDice, playCasino } = require("./betting-games");
 const { CATEGORY_LABELS, DIFFICULTY_LABELS, QuizManager, QUIZ_REWARD } = require("./quiz");
 const { formatMarriageDetails, formatMarriageListMessages } = require("./marriage-time");
+const { getPreferredTelegramName, mergeTelegramIdentity, resolveMarriageParticipants } = require("./marriage-participants");
 const { RpPresentationSelector, buildRpText } = require("./rp-presentation");
 const { TagCallController } = require("./tag-call-controller");
 const { DeferredJsonWriter } = require("./deferred-json-writer");
@@ -1544,12 +1545,21 @@ function getAllMarriages(chatId) {
 
       return {
         user1_id: firstUserId,
-        user1_name: firstUser ? getMarriageDisplayName(firstUser) : `ID:${firstUserId}`,
+        user1_name: getMarriageDisplayName(firstUser),
         user2_id: secondUserId,
-        user2_name: secondUser ? getMarriageDisplayName(secondUser) : `ID:${secondUserId}`,
+        user2_name: getMarriageDisplayName(secondUser),
         married_at: marriedAt
       };
     });
+}
+
+function recordMarriageListDiagnostic(chatId, source, diagnostic) {
+  const { error: diagnosticError, ...context } = diagnostic;
+  const error = diagnosticError instanceof Error
+    ? diagnosticError
+    : new Error(`Marriage list diagnostic: ${diagnostic.code}`);
+  const correlationId = recordRuntimeError(source, error, { chatId, ...context });
+  console.error(`Marriage list error (${correlationId}):`, error.message);
 }
 
 function removeMarriage(chatId, userId) {
@@ -1942,14 +1952,12 @@ setupBotCommands();
 function getUser(user) {
   const id = user.id;
   let changed = false;
+  const existingProfile = users.get(id);
+  const identity = mergeTelegramIdentity(existingProfile, user);
 
-  if (!users.has(id)) {
+  if (!existingProfile) {
     users.set(id, {
-      id,
-      firstName: user.first_name || "Пользователь",
-      lastName: user.last_name || "",
-      username: user.username || "нет",
-      isBot: user.is_bot === true,
+      ...identity,
       messages: 0,
       warnings: 0
     });
@@ -1957,29 +1965,11 @@ function getUser(user) {
   }
 
   const profile = users.get(id);
-  const firstName = user.first_name || profile.firstName || "Пользователь";
-  const lastName = user.last_name || profile.lastName || "";
-  const username = user.username || profile.username || "нет";
-  const isBot = user.is_bot === true;
-
-  if (profile.firstName !== firstName) {
-    profile.firstName = firstName;
-    changed = true;
-  }
-
-  if (profile.lastName !== lastName) {
-    profile.lastName = lastName;
-    changed = true;
-  }
-
-  if (profile.username !== username) {
-    profile.username = username;
-    changed = true;
-  }
-
-  if (profile.isBot !== isBot) {
-    profile.isBot = isBot;
-    changed = true;
+  for (const property of ["id", "firstName", "lastName", "username", "isBot"]) {
+    if (profile[property] !== identity[property]) {
+      profile[property] = identity[property];
+      changed = true;
+    }
   }
 
   if (typeof profile.messages !== "number") {
@@ -2005,9 +1995,9 @@ function isPrivateChat(msg) {
 
 function registerUserInChat(msg) {
   if (!msg.from || !msg.chat) return;
+  const profile = getUser(msg.from);
   if (isPrivateChat(msg)) return;
 
-  const profile = getUser(msg.from);
   const chatId = msg.chat.id;
 
   if (!chatUsers.has(chatId)) {
@@ -2068,13 +2058,7 @@ function getUserDisplayName(profile) {
 }
 
 function getMarriageDisplayName(user) {
-  if (!user) return "Пользователь";
-
-  const firstName = user.firstName || user.first_name || "";
-  const lastName = user.lastName || user.last_name || "";
-  const fullName = `${firstName} ${lastName}`.trim();
-
-  return fullName || (user.id ? `ID:${user.id}` : "Пользователь");
+  return getPreferredTelegramName(user);
 }
 
 function getRussianPlural(value, one, few, many) {
@@ -6222,9 +6206,9 @@ bot.on("message", async (msg) => {
   if (/^браки$/i.test(msg.text.trim())) {
     if (!ensureCommandEnabled(msg, "brak")) return;
 
-    const list = getAllMarriages(msg.chat.id);
+    const storedList = getAllMarriages(msg.chat.id);
 
-    if (!list.length) {
+    if (!storedList.length) {
       bot.sendMessage(
         msg.chat.id,
         "💔 В этом чате пока никто не женат.",
@@ -6233,15 +6217,20 @@ bot.on("message", async (msg) => {
       return;
     }
 
+    const list = await resolveMarriageParticipants(storedList, {
+      chatId: msg.chat.id,
+      getStoredUser: (userId) => users.get(userId),
+      getChatMember: (chatId, userId) => bot.getChatMember(chatId, userId),
+      upsertUser: (telegramUser) => getUser(telegramUser),
+      onDiagnostic: (diagnostic) => {
+        recordMarriageListDiagnostic(msg.chat.id, "marriage.participant_resolution", diagnostic);
+      }
+    });
+
     const messages = formatMarriageListMessages(list, {
       escapeHtml: escapeHtmlText,
       onDiagnostic: (diagnostic) => {
-        const error = new Error(`Marriage list formatting diagnostic: ${diagnostic.code}`);
-        const correlationId = recordRuntimeError("marriage.list_format", error, {
-          chatId: msg.chat.id,
-          ...diagnostic
-        });
-        console.error(`Marriage list formatting error (${correlationId}):`, error.message);
+        recordMarriageListDiagnostic(msg.chat.id, "marriage.list_format", diagnostic);
       }
     });
 

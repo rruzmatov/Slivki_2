@@ -90,11 +90,31 @@ test("production marriage list uses the shared HTML formatter without wedding da
   const handler = start >= 0 && end > start ? source.slice(start, end) : "";
   assert.ok(handler, "marriage list handler not found");
   assert.match(handler, /formatMarriageListMessages\(list,/);
+  assert.match(handler, /await resolveMarriageParticipants\(storedList,/);
+  assert.match(handler, /getStoredUser: \(userId\) => users\.get\(userId\)/);
+  assert.match(handler, /getChatMember: \(chatId, userId\) => bot\.getChatMember\(chatId, userId\)/);
+  assert.match(handler, /upsertUser: \(telegramUser\) => getUser\(telegramUser\)/);
   assert.match(handler, /escapeHtml: escapeHtmlText/);
   assert.match(handler, /parse_mode: "HTML"/);
-  assert.match(handler, /recordRuntimeError\("marriage\.list_format"/);
+  assert.match(handler, /recordMarriageListDiagnostic\(msg\.chat\.id, "marriage\.list_format"/);
   assert.match(handler, /await sendMessageSafe\(msg\.chat\.id, text, options, "marriageList"\)/);
   assert.doesNotMatch(handler, /formatMarriageDetails|Дата свадьбы|До годовщины/);
+});
+
+test("every Telegram message refreshes the stored identity before chat-specific handling", () => {
+  const listenerStart = source.indexOf('bot.on("message", async (msg) => {');
+  const listenerEnd = source.indexOf("// --- Command Normalization Layer ---", listenerStart);
+  const listener = listenerStart >= 0 && listenerEnd > listenerStart ? source.slice(listenerStart, listenerEnd) : "";
+  const getUserStart = source.indexOf("function getUser(user)");
+  const getUserEnd = source.indexOf("function isPrivateChat", getUserStart);
+  const getUserHandler = getUserStart >= 0 && getUserEnd > getUserStart ? source.slice(getUserStart, getUserEnd) : "";
+  const registerStart = source.indexOf("function registerUserInChat(msg)");
+  const registerEnd = source.indexOf("function getTelegramName", registerStart);
+  const registerHandler = registerStart >= 0 && registerEnd > registerStart ? source.slice(registerStart, registerEnd) : "";
+  assert.match(listener, /registerUserInChat\(msg\)/);
+  assert.match(getUserHandler, /mergeTelegramIdentity\(existingProfile, user\)/);
+  assert.match(getUserHandler, /saveUsers\(\)/);
+  assert.ok(registerHandler.indexOf("getUser(msg.from)") < registerHandler.indexOf("isPrivateChat(msg)"));
 });
 
 test("Telegram admin commands remain reply-only with all legacy aliases", () => {
