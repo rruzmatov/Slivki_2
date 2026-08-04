@@ -935,13 +935,15 @@ bot.on("message", async (msg) => {
   }
 
   if (!msg.from.is_bot) {
-    const userStats = getOrCreateUserStats(msg.from);
-    console.log("USER STATS:", JSON.stringify(userStats, null, 2));
+    const isCommand =
+      typeof msg.text === "string" &&
+      msg.text.startsWith("/");
 
-    console.log(
-      "Статистика пользователя создана или загружена:",
-      userStats
-    );
+    incrementUserStat(msg.from, "messages", 1);
+
+    if (isCommand) {
+      incrementUserStat(msg.from, "commands", 1);
+    }
 
     currencyStore.ensureUser(msg.from);
   }
@@ -2372,24 +2374,68 @@ function getAllAdminLogsText() {
   return "📋 Последние админ-действия во всех группах:\n\n" + formatAdminLogs(logs, { showChat: true });
 }
 
-bot.onText(/^(?:\/stats(?:@\w+)?|стата)(?:\s|$)/i, async (msg) => {
-  registerUserInChat(msg);
-  if (!ensureCommandEnabled(msg, "stats")) return;
+bot.onText(
+  /^(?:\/stats(?:@\w+)?|стата|статистика)(?:\s|$)/i,
+  async (msg) => {
+    registerUserInChat(msg);
 
-  if (isPrivateChat(msg)) {
-    bot.sendMessage(msg.chat.id, "👤 Добавь меня в группу, чтобы пользоваться командой /stats.");
-    return;
+    if (!ensureCommandEnabled(msg, "stats")) {
+      return;
+    }
+
+    let targetUser = msg.from;
+
+    // Если команда отправлена ответом на сообщение
+    if (msg.reply_to_message?.from) {
+      targetUser = msg.reply_to_message.from;
+
+      registerUserInChat({
+        chat: msg.chat,
+        from: targetUser
+      });
+    } else {
+      // Если указан @username или Telegram ID
+      const targetProfile = resolveTargetProfile(msg);
+
+      if (targetProfile) {
+        targetUser = {
+          id: Number(targetProfile.id),
+          first_name: targetProfile.firstName || "",
+          last_name: targetProfile.lastName || "",
+          username:
+            targetProfile.username &&
+              targetProfile.username !== "нет"
+              ? targetProfile.username
+              : ""
+        };
+      } else {
+        const args = getCommandArgs(msg);
+
+        if (args) {
+          await bot.sendMessage(
+            msg.chat.id,
+            "⚠️ Пользователь не найден.\n\nИспользуй команду ответом на сообщение, через @username или Telegram ID.",
+            {
+              reply_parameters: {
+                message_id: msg.message_id
+              }
+            }
+          );
+
+          return;
+        }
+      }
+    }
+
+    const text = getUserStatsText(targetUser);
+
+    await bot.sendMessage(msg.chat.id, text, {
+      reply_parameters: {
+        message_id: msg.message_id
+      }
+    });
   }
-
-  const senderCanUseAdminCommands = await canUseAdminCommands(msg.chat.id, msg.from.id);
-
-  if (!senderCanUseAdminCommands) {
-    bot.sendMessage(msg.chat.id, "⛔ Вы не админ, поэтому не можете смотреть статистику.");
-    return;
-  }
-
-  bot.sendMessage(msg.chat.id, await getStatsText(msg.chat.id));
-});
+);
 
 function findUserByUsername(username) {
   const cleanUsername = username.replace("@", "").toLowerCase();
@@ -2414,29 +2460,135 @@ function resetDailyStatsIfNeeded() {
   }
 }
 
-async function getStatsText(chatId) {
-  resetDailyStatsIfNeeded();
+function formatUserStatsDate(timestamp) {
+  const value = Number(timestamp);
 
-  let totalUsers = 0;
-
-  try {
-    totalUsers = await bot.getChatMemberCount(chatId);
-  } catch (error) {
-    console.error("Stats count error:", getErrorMessage(error));
-    totalUsers = chatUsers.has(chatId) ? chatUsers.get(chatId).size : users.size;
+  if (!Number.isFinite(value) || value <= 0) {
+    return "Нет данных";
   }
+
+  return new Date(value).toLocaleString("ru-RU", {
+    timeZone: "Asia/Tashkent",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function getUserStatsText(user) {
+  const userStats = getOrCreateUserStats(user);
+
+  const fullName = [
+    userStats.firstName,
+    userStats.lastName
+  ]
+    .filter(Boolean)
+    .join(" ") || "Пользователь";
+
+  const username = userStats.username
+    ? `@${userStats.username}`
+    : "Нет";
+
+  return [
+    "«СЛИВКИ»",
+    "📊 СТАТИСТИКА ПОЛЬЗОВАТЕЛЯ",
+    "",
+    `👤 Имя: ${fullName}`,
+    `🏷 Username: ${username}`,
+    `🆔 Telegram ID: ${userStats.telegramId}`,
+    "",
+    `💬 Сообщений: ${Number(userStats.messages) || 0}`,
+    `⌨️ Команд: ${Number(userStats.commands) || 0}`,
+    `🎭 RP-действий: ${Number(userStats.rpActions) || 0}`,
+    "",
+    `🏆 Побед в играх: ${Number(userStats.gameWins) || 0}`,
+    `💔 Поражений в играх: ${Number(userStats.gameLosses) || 0}`,
+    "",
+    `🎰 Игр в казино: ${Number(userStats.casinoGames) || 0}`,
+    `✅ Побед в казино: ${Number(userStats.casinoWins) || 0}`,
+    `❌ Поражений в казино: ${Number(userStats.casinoLosses) || 0}`,
+    "",
+    `🧠 Ответов в викторине: ${Number(userStats.quizAnswers) || 0}`,
+    `🎯 Правильных ответов: ${Number(userStats.quizCorrectAnswers) || 0}`,
+    "",
+    `⚠️ Варнов: ${Number(userStats.warnsReceived) || 0}`,
+    `🔇 Мутов: ${Number(userStats.mutesReceived) || 0}`,
+    `🚫 Банов: ${Number(userStats.bansReceived) || 0}`,
+    `⭐ Репутация: ${Number(userStats.reputation) || 0}`,
+    "",
+    `📅 Регистрация: ${formatUserStatsDate(userStats.registeredAt)}`,
+    `🕒 Последняя активность: ${formatUserStatsDate(userStats.lastActiveAt)}`
+  ].join("\n");
+}
 
   const seenUsersInThisGroup = chatUsers.has(chatId) ? chatUsers.get(chatId).size : 0;
   const messagesInThisGroup = stats.chatMessagesToday?.[chatId] || 0;
 
-  return (
-    "«СЛИВКИ»\n" +
-    "📊 СТАТИСТИКА ГРУППЫ\n\n" +
-    `👥 Участников в этой группе: ${totalUsers}\n\n` +
-    `👤 Пользователей, которых бот видел в этой группе: ${seenUsersInThisGroup}\n\n` +
-    `💬 Сообщений сегодня в этой группе: ${messagesInThisGroup}`
-  );
-}
+  function formatUserStatsDate(timestamp) {
+    const value = Number(timestamp);
+
+    if (!Number.isFinite(value) || value <= 0) {
+      return "Нет данных";
+    }
+
+    return new Date(value).toLocaleString("ru-RU", {
+      timeZone: "Asia/Tashkent",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+  }
+
+  function getUserStatsText(user) {
+    const userStats = getOrCreateUserStats(user);
+
+    const fullName = [
+      userStats.firstName,
+      userStats.lastName
+    ]
+      .filter(Boolean)
+      .join(" ") || "Пользователь";
+
+    const username = userStats.username
+      ? `@${userStats.username}`
+      : "Нет";
+
+    return [
+      "«СЛИВКИ»",
+      "📊 СТАТИСТИКА ПОЛЬЗОВАТЕЛЯ",
+      "",
+      `👤 Имя: ${fullName}`,
+      `🏷 Username: ${username}`,
+      `🆔 Telegram ID: ${userStats.telegramId}`,
+      "",
+      `💬 Сообщений: ${Number(userStats.messages) || 0}`,
+      `⌨️ Команд: ${Number(userStats.commands) || 0}`,
+      `🎭 RP-действий: ${Number(userStats.rpActions) || 0}`,
+      "",
+      `🏆 Побед в играх: ${Number(userStats.gameWins) || 0}`,
+      `💔 Поражений в играх: ${Number(userStats.gameLosses) || 0}`,
+      "",
+      `🎰 Игр в казино: ${Number(userStats.casinoGames) || 0}`,
+      `✅ Побед в казино: ${Number(userStats.casinoWins) || 0}`,
+      `❌ Поражений в казино: ${Number(userStats.casinoLosses) || 0}`,
+      "",
+      `🧠 Ответов в викторине: ${Number(userStats.quizAnswers) || 0}`,
+      `🎯 Правильных ответов: ${Number(userStats.quizCorrectAnswers) || 0}`,
+      "",
+      `⚠️ Варнов: ${Number(userStats.warnsReceived) || 0}`,
+      `🔇 Мутов: ${Number(userStats.mutesReceived) || 0}`,
+      `🚫 Банов: ${Number(userStats.bansReceived) || 0}`,
+      `⭐ Репутация: ${Number(userStats.reputation) || 0}`,
+      "",
+      `📅 Регистрация: ${formatUserStatsDate(userStats.registeredAt)}`,
+      `🕒 Последняя активность: ${formatUserStatsDate(userStats.lastActiveAt)}`
+    ].join("\n");
+  }
+
 
 async function getAdminStatsText() {
   resetDailyStatsIfNeeded();
@@ -3212,7 +3364,7 @@ const COMMANDS_PAGES = [
       { setting: "profile", sticker: "👤", command: "/profile", description: "профиль пользователя" },
       { setting: "top", sticker: "🏆", command: "/top", description: "топ активных участников" },
       { setting: "admins", sticker: "👑", command: "/admins", description: "список администраторов" },
-      { setting: "stats", sticker: "📊", command: "/stats", description: "статистика группы" },
+      { setting: "stats", sticker: "📊", command: "/stats", description: "статистика пользователя" },
       { setting: "logs", sticker: "📋", command: "/logs", description: "логи админ-действий" },
       { setting: "id", sticker: "🆔", command: "/id", description: "ID пользователя или сообщения" },
       { setting: "emojiid", sticker: "💎", command: "/emojiid", description: "ID Premium Emoji из ответа" },
