@@ -1820,6 +1820,68 @@ async function sendRpActionMessage(msg, command, commandData) {
   });
 }
 
+const handledRpMessageIds = new Set();
+
+function normalizeRpCommandText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^\//, "")
+    .replace(/\s+/g, " ");
+}
+
+bot.on("message", async (msg) => {
+  if (!msg?.text || !msg.from || msg.from.is_bot) return;
+  if (msg.chat?.type === "private") return;
+
+  const commandText = normalizeRpCommandText(msg.text);
+  const compactCommandText = commandText.replace(/\s+/g, "");
+  const commandData =
+    RP_COMMANDS[commandText] ||
+    RP_COMMANDS[compactCommandText];
+
+  if (!commandData) return;
+  if (!ensureCommandEnabled(msg, "action")) return;
+
+  if (!msg.reply_to_message?.from || msg.reply_to_message.from.is_bot) {
+    await bot.sendMessage(msg.chat.id, RP_REPLY_HINT, {
+      reply_parameters: {
+        message_id: msg.message_id
+      }
+    });
+
+    return;
+  }
+
+  const messageKey = `${msg.chat.id}:${msg.message_id}`;
+
+  if (handledRpMessageIds.has(messageKey)) {
+    return;
+  }
+
+  handledRpMessageIds.add(messageKey);
+
+  if (handledRpMessageIds.size > 2000) {
+    handledRpMessageIds.delete(
+      handledRpMessageIds.values().next().value
+    );
+  }
+
+  registerUserInChat(msg);
+
+  registerUserInChat({
+    chat: msg.chat,
+    from: msg.reply_to_message.from
+  });
+
+  incrementUserStat(msg.from, "rpActions", 1);
+
+  await sendRpActionMessage(
+    msg,
+    commandText,
+    commandData
+  );
+});
 
 const DEFAULT_COMMAND_SETTINGS = [
   ["start", true],
