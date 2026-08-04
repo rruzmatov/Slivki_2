@@ -2585,71 +2585,71 @@ function getUserStatsText(user) {
   ].join("\n");
 }
 
-  const seenUsersInThisGroup = chatUsers.has(chatId) ? chatUsers.get(chatId).size : 0;
-  const messagesInThisGroup = stats.chatMessagesToday?.[chatId] || 0;
+const seenUsersInThisGroup = chatUsers.has(chatId) ? chatUsers.get(chatId).size : 0;
+const messagesInThisGroup = stats.chatMessagesToday?.[chatId] || 0;
 
-  function formatUserStatsDate(timestamp) {
-    const value = Number(timestamp);
+function formatUserStatsDate(timestamp) {
+  const value = Number(timestamp);
 
-    if (!Number.isFinite(value) || value <= 0) {
-      return "Нет данных";
-    }
-
-    return new Date(value).toLocaleString("ru-RU", {
-      timeZone: "Asia/Tashkent",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
+  if (!Number.isFinite(value) || value <= 0) {
+    return "Нет данных";
   }
 
-  function getUserStatsText(user) {
-    const userStats = getOrCreateUserStats(user);
+  return new Date(value).toLocaleString("ru-RU", {
+    timeZone: "Asia/Tashkent",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
 
-    const fullName = [
-      userStats.firstName,
-      userStats.lastName
-    ]
-      .filter(Boolean)
-      .join(" ") || "Пользователь";
+function getUserStatsText(user) {
+  const userStats = getOrCreateUserStats(user);
 
-    const username = userStats.username
-      ? `@${userStats.username}`
-      : "Нет";
+  const fullName = [
+    userStats.firstName,
+    userStats.lastName
+  ]
+    .filter(Boolean)
+    .join(" ") || "Пользователь";
 
-    return [
-      "«СЛИВКИ»",
-      "📊 СТАТИСТИКА ПОЛЬЗОВАТЕЛЯ",
-      "",
-      `👤 Имя: ${fullName}`,
-      `🏷 Username: ${username}`,
-      `🆔 Telegram ID: ${userStats.telegramId}`,
-      "",
-      `💬 Сообщений: ${Number(userStats.messages) || 0}`,
-      `⌨️ Команд: ${Number(userStats.commands) || 0}`,
-      `🎭 RP-действий: ${Number(userStats.rpActions) || 0}`,
-      "",
-      `🏆 Побед в играх: ${Number(userStats.gameWins) || 0}`,
-      `💔 Поражений в играх: ${Number(userStats.gameLosses) || 0}`,
-      "",
-      `🎰 Игр в казино: ${Number(userStats.casinoGames) || 0}`,
-      `✅ Побед в казино: ${Number(userStats.casinoWins) || 0}`,
-      `❌ Поражений в казино: ${Number(userStats.casinoLosses) || 0}`,
-      "",
-      `🧠 Ответов в викторине: ${Number(userStats.quizAnswers) || 0}`,
-      `🎯 Правильных ответов: ${Number(userStats.quizCorrectAnswers) || 0}`,
-      "",
-      `⚠️ Варнов: ${Number(userStats.warnsReceived) || 0}`,
-      `🔇 Мутов: ${Number(userStats.mutesReceived) || 0}`,
-      `🚫 Банов: ${Number(userStats.bansReceived) || 0}`,
-      `⭐ Репутация: ${Number(userStats.reputation) || 0}`,
-      "",
-      `📅 Регистрация: ${formatUserStatsDate(userStats.registeredAt)}`,
-      `🕒 Последняя активность: ${formatUserStatsDate(userStats.lastActiveAt)}`
-    ].join("\n");
-  }
+  const username = userStats.username
+    ? `@${userStats.username}`
+    : "Нет";
+
+  return [
+    "«СЛИВКИ»",
+    "📊 СТАТИСТИКА ПОЛЬЗОВАТЕЛЯ",
+    "",
+    `👤 Имя: ${fullName}`,
+    `🏷 Username: ${username}`,
+    `🆔 Telegram ID: ${userStats.telegramId}`,
+    "",
+    `💬 Сообщений: ${Number(userStats.messages) || 0}`,
+    `⌨️ Команд: ${Number(userStats.commands) || 0}`,
+    `🎭 RP-действий: ${Number(userStats.rpActions) || 0}`,
+    "",
+    `🏆 Побед в играх: ${Number(userStats.gameWins) || 0}`,
+    `💔 Поражений в играх: ${Number(userStats.gameLosses) || 0}`,
+    "",
+    `🎰 Игр в казино: ${Number(userStats.casinoGames) || 0}`,
+    `✅ Побед в казино: ${Number(userStats.casinoWins) || 0}`,
+    `❌ Поражений в казино: ${Number(userStats.casinoLosses) || 0}`,
+    "",
+    `🧠 Ответов в викторине: ${Number(userStats.quizAnswers) || 0}`,
+    `🎯 Правильных ответов: ${Number(userStats.quizCorrectAnswers) || 0}`,
+    "",
+    `⚠️ Варнов: ${Number(userStats.warnsReceived) || 0}`,
+    `🔇 Мутов: ${Number(userStats.mutesReceived) || 0}`,
+    `🚫 Банов: ${Number(userStats.bansReceived) || 0}`,
+    `⭐ Репутация: ${Number(userStats.reputation) || 0}`,
+    "",
+    `📅 Регистрация: ${formatUserStatsDate(userStats.registeredAt)}`,
+    `🕒 Последняя активность: ${formatUserStatsDate(userStats.lastActiveAt)}`
+  ].join("\n");
+}
 
 
 async function getAdminStatsText() {
@@ -6720,6 +6720,10 @@ bot.on("message", async (msg) => {
   }
 
   const commandText = (msg.text || "").trim().toLowerCase();
+  
+  console.log("RP TEXT =", commandText);
+  console.log("RP EXISTS =", !!RP_COMMANDS[commandText]);
+
   const commandData = RP_COMMANDS[commandText];
 
   if (commandData) {
