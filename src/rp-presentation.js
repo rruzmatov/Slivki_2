@@ -21,9 +21,6 @@ class RpPresentationSelector {
 
 const RP_TEXT_TEMPLATES = [
   ({ actor, action, target }) => `${actor} ${action} ${target}`,
-  ({ actor, action, target }) => `Сцена дня: ${actor} ${action} ${target}`,
-  ({ actor, action, target }) => `В центре внимания: ${actor} ${action} ${target}`,
-  ({ actor, action, target }) => `Неожиданный поворот: ${actor} ${action} ${target}`,
   ({ actor, action, target }) => `Момент между ${actor} и ${target}: ${actor} ${action} ${target}`
 ];
 

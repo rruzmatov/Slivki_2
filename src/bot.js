@@ -42,6 +42,12 @@ const {
   isMuteLifted,
   isRightForbidden
 } = require("./telegram-moderation");
+const {
+  getOrCreateUserStats,
+  incrementUserStat,
+  updateUserStats,
+  getUserStatsById
+} = require("./utils/userStats");
 
 const botToken = process.env.BOT_TOKEN;
 
@@ -924,7 +930,19 @@ for (const [key, mute] of savedChatSettings.activeMutes) {
 }
 
 bot.on("message", async (msg) => {
-  if (msg.from) {
+  if (!msg.from) {
+    return;
+  }
+
+  if (!msg.from.is_bot) {
+    const userStats = getOrCreateUserStats(msg.from);
+    console.log("USER STATS:", JSON.stringify(userStats, null, 2));
+
+    console.log(
+      "Статистика пользователя создана или загружена:",
+      userStats
+    );
+
     currencyStore.ensureUser(msg.from);
   }
 
@@ -933,7 +951,10 @@ bot.on("message", async (msg) => {
   try {
     await enforceSlowMode(msg);
   } catch (error) {
-    console.error("Slowmode enforcement error:", getErrorMessage(error));
+    console.error(
+      "Slowmode enforcement error:",
+      getErrorMessage(error)
+    );
   }
 });
 
@@ -3725,7 +3746,7 @@ function scheduleQuizExpiration(quiz) {
     if (result.status !== "expired" || !result.quiz.messageId) return;
     await bot.editMessageReplyMarkup({ inline_keyboard: [] }, {
       chat_id: result.quiz.chatId, message_id: result.quiz.messageId
-    }).catch(() => {});
+    }).catch(() => { });
     await sendMessageSafe(
       result.quiz.chatId,
       `⏰ Время викторины истекло.\nПравильный ответ: ${result.quiz.question.options[result.quiz.question.correctIndex]}`
