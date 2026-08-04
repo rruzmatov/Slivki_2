@@ -1891,7 +1891,207 @@ const RP_COMMANDS = {
   "оставить синяки": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил синяки" },
   "оставить укусы": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил укусы" },
   "оставить засосы": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил засосы" },
-  "оставить сперму": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "оставил сперму" }
+  "оставить сперму": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "оставил сперму" },
+
+  // ===== Романтика (дополнительно) =====
+"обнять крепко": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "крепко обнял" },
+"прижать к себе": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "прижал к себе" },
+"прижаться": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "прижался к" },
+"обнимашки": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "обнимает" },
+"обнять со спины": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "обнял со спины" },
+"положить голову на плечо": { emoji: "😌", customEmojiId: PREMIUM_EMOJI.hug, actionText: "положил голову на плечо" },
+"прижаться щекой": { emoji: "😌", customEmojiId: PREMIUM_EMOJI.hug, actionText: "прижался щекой к" },
+"держать за талию": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.heart, actionText: "держит за талию" },
+"обхватить руками": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "обхватил руками" },
+"прижать к стене": { emoji: "😏", customEmojiId: PREMIUM_EMOJI.hug, actionText: "прижал к стене" },
+
+"поцеловать в губы": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "поцеловал в губы" },
+"поцеловать в шею": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "поцеловал в шею" },
+"поцеловать в лоб": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "поцеловал в лоб" },
+"поцеловать в щёку": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "поцеловал в щёку" },
+"поцеловать в руку": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "поцеловал руку" },
+"поцеловать в нос": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "поцеловал в нос" },
+"поцеловать в плечо": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "поцеловал в плечо" },
+"чмокнуть": { emoji: "😗", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "чмокнул" },
+"оставить поцелуй": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил поцелуй" },
+"глубоко поцеловать": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "глубоко поцеловал" },
+
+"смотреть в глаза": { emoji: "👀", customEmojiId: PREMIUM_EMOJI.heart, actionText: "смотрит в глаза" },
+"нежно смотреть": { emoji: "🥰", customEmojiId: PREMIUM_EMOJI.heart, actionText: "нежно смотрит на" },
+"заглянуть в глаза": { emoji: "👀", customEmojiId: PREMIUM_EMOJI.heart, actionText: "заглянул в глаза" },
+"улыбнуться": { emoji: "😊", customEmojiId: PREMIUM_EMOJI.rp_podarit_ulybku, actionText: "улыбнулся" },
+"нежно улыбнуться": { emoji: "🥰", customEmojiId: PREMIUM_EMOJI.rp_podarit_ulybku, actionText: "нежно улыбнулся" },
+"подмигнуть": { emoji: "😉", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подмигнул" },
+"поднять бровь": { emoji: "🤨", customEmojiId: PREMIUM_EMOJI.heart, actionText: "поднял бровь" },
+"засмеяться": { emoji: "😄", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "засмеялся" },
+"хихикнуть": { emoji: "🤭", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "хихикнул" },
+"смутиться": { emoji: "😳", customEmojiId: PREMIUM_EMOJI.heart, actionText: "смутился" },
+
+"прошептать": { emoji: "🤫", customEmojiId: PREMIUM_EMOJI.heart, actionText: "прошептал" },
+"шепнуть на ухо": { emoji: "🤫", customEmojiId: PREMIUM_EMOJI.heart, actionText: "шепнул на ухо" },
+"сказать комплимент": { emoji: "💖", customEmojiId: PREMIUM_EMOJI.praise, actionText: "сказал комплимент" },
+"похвалить красоту": { emoji: "💖", customEmojiId: PREMIUM_EMOJI.praise, actionText: "похвалил красоту" },
+"сказать «ты красивая»": { emoji: "💖", customEmojiId: PREMIUM_EMOJI.praise, actionText: "сказал «ты красивая»" },
+"сказать «ты красивый»": { emoji: "💖", customEmojiId: PREMIUM_EMOJI.praise, actionText: "сказал «ты красивый»" },
+"признаться в симпатии": { emoji: "💘", customEmojiId: PREMIUM_EMOJI.heart, actionText: "признался в симпатии" },
+"признаться в любви": { emoji: "💘", customEmojiId: PREMIUM_EMOJI.heart, actionText: "признался в любви" },
+"сказать «люблю»": { emoji: "💘", customEmojiId: PREMIUM_EMOJI.heart, actionText: "сказал «люблю»" },
+"сказать «нравишься»": { emoji: "💕", customEmojiId: PREMIUM_EMOJI.heart, actionText: "сказал «нравишься»" },
+
+"взять за руку": { emoji: "🤝", customEmojiId: PREMIUM_EMOJI.heart, actionText: "взял за руку" },
+"держать за руку": { emoji: "🤝", customEmojiId: PREMIUM_EMOJI.heart, actionText: "держит за руку" },
+"переплести пальцы": { emoji: "🤞", customEmojiId: PREMIUM_EMOJI.heart, actionText: "переплёл пальцы" },
+"погладить по голове": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.hug, actionText: "погладил по голове" },
+"погладить по щеке": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.hug, actionText: "погладил по щеке" },
+"погладить по волосам": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.hug, actionText: "погладил по волосам" },
+"провести пальцем по щеке": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.hug, actionText: "провёл пальцем по щеке" },
+"убрать волосы с лица": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.hug, actionText: "убрал волосы с лица" },
+"поправить волосы": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.hug, actionText: "поправил волосы" },
+"пощекотать": { emoji: "🤭", customEmojiId: PREMIUM_EMOJI.rp_uschipnut, actionText: "пощекотал" },
+
+"посадить на руки": { emoji: "💪", customEmojiId: PREMIUM_EMOJI.hug, actionText: "посадил на руки" },
+"носить на руках": { emoji: "💪", customEmojiId: PREMIUM_EMOJI.hug, actionText: "носит на руках" },
+"поднять на руки": { emoji: "💪", customEmojiId: PREMIUM_EMOJI.hug, actionText: "поднял на руки" },
+"кружить": { emoji: "💫", customEmojiId: PREMIUM_EMOJI.hug, actionText: "закружил" },
+"подбросить": { emoji: "💫", customEmojiId: PREMIUM_EMOJI.hug, actionText: "подбросил" },
+"прижать к груди": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "прижал к груди" },
+"укрыть пледом": { emoji: "🛏", customEmojiId: PREMIUM_EMOJI.rp_usypit, actionText: "укрыл пледом" },
+"уложить спать": { emoji: "😴", customEmojiId: PREMIUM_EMOJI.rp_usypit, actionText: "уложил спать" },
+"усыпить": { emoji: "😴", customEmojiId: PREMIUM_EMOJI.rp_usypit, actionText: "усыпил" },
+"спеть колыбельную": { emoji: "🎵", customEmojiId: PREMIUM_EMOJI.rp_usypit, actionText: "спел колыбельную" },
+
+"пригласить на свидание": { emoji: "🌹", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил на свидание" },
+"пригласить на ужин": { emoji: "🍷", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил на ужин" },
+"пригласить в кино": { emoji: "🎬", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил в кино" },
+"пригласить на прогулку": { emoji: "🚶", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил на прогулку" },
+"пригласить танцевать": { emoji: "💃", customEmojiId: PREMIUM_EMOJI.rp_stantsevat, actionText: "пригласил танцевать" },
+"станцевать": { emoji: "💃", customEmojiId: PREMIUM_EMOJI.rp_stantsevat, actionText: "станцевал с" },
+"пригласить на пикник": { emoji: "🧺", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил на пикник" },
+"пригласить смотреть звёзды": { emoji: "🌟", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил смотреть звёзды" },
+"пригласить на закат": { emoji: "🌅", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил смотреть закат" },
+"пригласить на рассвет": { emoji: "🌄", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил смотреть рассвет" },
+
+"подарить розу": { emoji: "🌹", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подарил розу" },
+"подарить цветы": { emoji: "💐", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подарил цветы" },
+"подарить сердце": { emoji: "❤️", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подарил сердце" },
+"подарить шоколад": { emoji: "🍫", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подарил шоколад" },
+"подарить конфеты": { emoji: "🍬", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подарил конфеты" },
+"подарить кольцо": { emoji: "💍", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подарил кольцо" },
+"подарить кулон": { emoji: "📿", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подарил кулон" },
+"подарить письмо": { emoji: "💌", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подарил письмо" },
+"написать признание": { emoji: "💌", customEmojiId: PREMIUM_EMOJI.heart, actionText: "написал признание" },
+"оставить записку": { emoji: "📝", customEmojiId: PREMIUM_EMOJI.heart, actionText: "оставил записку" },
+
+"ревновать": { emoji: "😤", customEmojiId: PREMIUM_EMOJI.rp_razozlit, actionText: "ревнует" },
+"завидовать": { emoji: "😒", customEmojiId: PREMIUM_EMOJI.rp_razozlit, actionText: "завидует" },
+"защищать": { emoji: "🛡️", customEmojiId: PREMIUM_EMOJI.shield, actionText: "защищает" },
+"оберегать": { emoji: "🛡️", customEmojiId: PREMIUM_EMOJI.shield, actionText: "оберегает" },
+"заботиться": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.heart, actionText: "заботится о" },
+"утешить": { emoji: "🥺", customEmojiId: PREMIUM_EMOJI.heart, actionText: "утешил" },
+"вытереть слёзы": { emoji: "🥺", customEmojiId: PREMIUM_EMOJI.heart, actionText: "вытер слёзы" },
+"обнять при грусти": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "обнял, когда грустно" },
+"быть рядом": { emoji: "🤍", customEmojiId: PREMIUM_EMOJI.heart, actionText: "просто рядом с" },
+"не отпускать": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "не отпускает" },
+
+"заигрывать": { emoji: "😏", customEmojiId: PREMIUM_EMOJI.heart, actionText: "заигрывает с" },
+"флиртовать": { emoji: "😏", customEmojiId: PREMIUM_EMOJI.heart, actionText: "флиртует с" },
+"соблазнять": { emoji: "🔥", customEmojiId: PREMIUM_EMOJI.heart, actionText: "соблазняет" },
+"дразнить": { emoji: "😜", customEmojiId: PREMIUM_EMOJI.heart, actionText: "дразнит" },
+"подкатывать": { emoji: "😎", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подкатывает к" },
+"делать комплименты": { emoji: "💖", customEmojiId: PREMIUM_EMOJI.praise, actionText: "делает комплименты" },
+"восхищаться": { emoji: "🤩", customEmojiId: PREMIUM_EMOJI.praise, actionText: "восхищается" },
+"смотреть с обожанием": { emoji: "🥰", customEmojiId: PREMIUM_EMOJI.heart, actionText: "смотрит с обожанием на" },
+"нежно трогать": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.hug, actionText: "нежно трогает" },
+"нежно гладить": { emoji: "🫶", customEmojiId: PREMIUM_EMOJI.hug, actionText: "нежно гладит" },
+
+// ===== Общение / Дружба / Весёлые =====
+"дать пять": { emoji: "🙏", customEmojiId: PREMIUM_EMOJI.rp_dat_pyat, actionText: "дал пять" },
+"пожать руку": { emoji: "🤝", customEmojiId: PREMIUM_EMOJI.rp_pozhat_ruku, actionText: "пожал руку" },
+"обняться по-дружески": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "обнял по-дружески" },
+"поддержать": { emoji: "🤝", customEmojiId: PREMIUM_EMOJI.rp_podderzhat, actionText: "поддержал" },
+"подбодрить": { emoji: "💪", customEmojiId: PREMIUM_EMOJI.rp_podderzhat, actionText: "подбодрил" },
+"утешить": { emoji: "🥺", customEmojiId: PREMIUM_EMOJI.heart, actionText: "утешил" },
+"пожалеть": { emoji: "🥺", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пожалел" },
+"похвалить": { emoji: "🌟", customEmojiId: PREMIUM_EMOJI.praise, actionText: "похвалил" },
+"поздравить": { emoji: "🎉", customEmojiId: PREMIUM_EMOJI.rp_pozdravit, actionText: "поздравил" },
+"поблагодарить": { emoji: "🙏", customEmojiId: PREMIUM_EMOJI.rp_dat_pyat, actionText: "поблагодарил" },
+
+"угостить": { emoji: "🍬", customEmojiId: PREMIUM_EMOJI.rp_ugostit, actionText: "угостил" },
+"накормить": { emoji: "🍽️", customEmojiId: PREMIUM_EMOJI.rp_nakormit, actionText: "накормил" },
+"напоить чаем": { emoji: "🍵", customEmojiId: PREMIUM_EMOJI.rp_napoit, actionText: "напоил чаем" },
+"напоить кофе": { emoji: "☕", customEmojiId: PREMIUM_EMOJI.rp_napoit, actionText: "напоил кофе" },
+"угостить мороженым": { emoji: "🍦", customEmojiId: PREMIUM_EMOJI.rp_ugostit, actionText: "угостил мороженым" },
+"угостить пиццей": { emoji: "🍕", customEmojiId: PREMIUM_EMOJI.rp_ugostit, actionText: "угостил пиццей" },
+"угостить бургером": { emoji: "🍔", customEmojiId: PREMIUM_EMOJI.rp_ugostit, actionText: "угостил бургером" },
+"угостить суши": { emoji: "🍣", customEmojiId: PREMIUM_EMOJI.rp_ugostit, actionText: "угостил суши" },
+"угостить тортом": { emoji: "🎂", customEmojiId: PREMIUM_EMOJI.rp_ugostit, actionText: "угостил тортом" },
+"угостить шашлыком": { emoji: "🍖", customEmojiId: PREMIUM_EMOJI.rp_ugostit, actionText: "угостил шашлыком" },
+
+"посмеяться": { emoji: "😂", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "посмеялся с" },
+"рассмешить": { emoji: "😂", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "рассмешил" },
+"развеселить": { emoji: "🥳", customEmojiId: PREMIUM_EMOJI.rp_razveselit, actionText: "развеселил" },
+"рассказать анекдот": { emoji: "🤭", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "рассказал анекдот" },
+"пошутить": { emoji: "😜", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "пошутил над" },
+"подколоть": { emoji: "😏", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "подколол" },
+"поддразнить": { emoji: "😜", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "поддразнил" },
+"показать язык": { emoji: "😝", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "показал язык" },
+"сделать рожицу": { emoji: "🤪", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "сделал рожицу" },
+"погримасничать": { emoji: "😜", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "погримасничал" },
+
+"щекотать": { emoji: "🤭", customEmojiId: PREMIUM_EMOJI.rp_uschipnut, actionText: "щекочет" },
+"ущипнуть": { emoji: "👌", customEmojiId: PREMIUM_EMOJI.rp_uschipnut, actionText: "ущипнул" },
+"толкнуть": { emoji: "🤜", customEmojiId: PREMIUM_EMOJI.rp_tolknut, actionText: "толкнул" },
+"догнать": { emoji: "🏃", customEmojiId: PREMIUM_EMOJI.rp_tolknut, actionText: "догнал" },
+"поймать": { emoji: "🎣", customEmojiId: PREMIUM_EMOJI.rp_poymat, actionText: "поймал" },
+"спрятаться": { emoji: "📦", customEmojiId: PREMIUM_EMOJI.rp_spryatat, actionText: "спрятался от" },
+"напугать": { emoji: "👻", customEmojiId: PREMIUM_EMOJI.rp_napugat, actionText: "напугало" },
+"кинуть подушку": { emoji: "🛏️", customEmojiId: PREMIUM_EMOJI.rp_kinut_podushku, actionText: "кинул подушку" },
+"кинуть снежок": { emoji: "❄️", customEmojiId: PREMIUM_EMOJI.rp_kinut_podushku, actionText: "кинул снежок" },
+"брызнуть водой": { emoji: "💧", customEmojiId: PREMIUM_EMOJI.rp_oblit_vodoy, actionText: "брызнул водой" },
+
+"обсыпать конфетти": { emoji: "🎉", customEmojiId: PREMIUM_EMOJI.rp_pozdravit, actionText: "обсыпал конфетти" },
+"сделать селфи": { emoji: "📸", customEmojiId: PREMIUM_EMOJI.heart, actionText: "сделал селфи с" },
+"сфотографировать": { emoji: "📷", customEmojiId: PREMIUM_EMOJI.heart, actionText: "сфотографировал" },
+"записать голосовое": { emoji: "🎤", customEmojiId: PREMIUM_EMOJI.heart, actionText: "записал голосовое для" },
+"отправить стикер": { emoji: "📌", customEmojiId: PREMIUM_EMOJI.heart, actionText: "отправил стикер" },
+"отправить мем": { emoji: "🐸", customEmojiId: PREMIUM_EMOJI.rp_rassmeshit, actionText: "отправил мем" },
+"показать фото": { emoji: "🖼️", customEmojiId: PREMIUM_EMOJI.heart, actionText: "показал фото" },
+"поделиться музыкой": { emoji: "🎵", customEmojiId: PREMIUM_EMOJI.heart, actionText: "поделился музыкой с" },
+"рекомендовать фильм": { emoji: "🎬", customEmojiId: PREMIUM_EMOJI.heart, actionText: "рекомендовал фильм" },
+"рекомендовать сериал": { emoji: "📺", customEmojiId: PREMIUM_EMOJI.heart, actionText: "рекомендовал сериал" },
+
+"поиграть": { emoji: "🎮", customEmojiId: PREMIUM_EMOJI.heart, actionText: "предложил поиграть" },
+"позвать в игру": { emoji: "🕹️", customEmojiId: PREMIUM_EMOJI.heart, actionText: "позвал в игру" },
+"пригласить в команду": { emoji: "👥", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пригласил в команду" },
+"поддержать в игре": { emoji: "🕹️", customEmojiId: PREMIUM_EMOJI.rp_podderzhat, actionText: "поддерживает в игре" },
+"поздравить с победой": { emoji: "🏆", customEmojiId: PREMIUM_EMOJI.rp_pozdravit, actionText: "поздравил с победой" },
+"утешить после поражения": { emoji: "🥺", customEmojiId: PREMIUM_EMOJI.heart, actionText: "утешил после поражения" },
+"предложить реванш": { emoji: "⚔️", customEmojiId: PREMIUM_EMOJI.heart, actionText: "предложил реванш" },
+"научить играть": { emoji: "📚", customEmojiId: PREMIUM_EMOJI.heart, actionText: "учит играть" },
+"показать гайд": { emoji: "📖", customEmojiId: PREMIUM_EMOJI.heart, actionText: "показал гайд" },
+"поделиться скином": { emoji: "🎨", customEmojiId: PREMIUM_EMOJI.heart, actionText: "поделился скином" },
+
+"поговорить": { emoji: "💬", customEmojiId: PREMIUM_EMOJI.heart, actionText: "поговорил с" },
+"выслушать": { emoji: "👂", customEmojiId: PREMIUM_EMOJI.heart, actionText: "выслушал" },
+"поделиться секретом": { emoji: "🤫", customEmojiId: PREMIUM_EMOJI.heart, actionText: "поделился секретом с" },
+"рассказать историю": { emoji: "📖", customEmojiId: PREMIUM_EMOJI.heart, actionText: "рассказал историю" },
+"посоветовать": { emoji: "💡", customEmojiId: PREMIUM_EMOJI.heart, actionText: "посоветовал" },
+"спросить совет": { emoji: "🤔", customEmojiId: PREMIUM_EMOJI.heart, actionText: "спросил совет у" },
+"поделиться новостью": { emoji: "📢", customEmojiId: PREMIUM_EMOJI.heart, actionText: "поделился новостью с" },
+"обсудить": { emoji: "🗣️", customEmojiId: PREMIUM_EMOJI.heart, actionText: "обсудил с" },
+"поспорить": { emoji: "🤨", customEmojiId: PREMIUM_EMOJI.heart, actionText: "поспорил с" },
+"согласиться": { emoji: "👍", customEmojiId: PREMIUM_EMOJI.heart, actionText: "согласился с" },
+
+"попрощаться": { emoji: "👋", customEmojiId: PREMIUM_EMOJI.rp_dat_podzatylnik, actionText: "попрощался с" },
+"пожелать спокойной ночи": { emoji: "🌙", customEmojiId: PREMIUM_EMOJI.rp_usypit, actionText: "пожелал спокойной ночи" },
+"пожелать доброго утра": { emoji: "🌅", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пожелал доброго утра" },
+"пожелать удачи": { emoji: "🍀", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пожелал удачи" },
+"пожелать хорошего дня": { emoji: "☀️", customEmojiId: PREMIUM_EMOJI.heart, actionText: "пожелал хорошего дня" },
+"пожелать сладких снов": { emoji: "😴", customEmojiId: PREMIUM_EMOJI.rp_usypit, actionText: "пожелал сладких снов" },
+"обнять на прощание": { emoji: "🤗", customEmojiId: PREMIUM_EMOJI.hug, actionText: "обнял на прощание" },
+"помахать": { emoji: "👋", customEmojiId: PREMIUM_EMOJI.rp_dat_podzatylnik, actionText: "помахал" },
+"кивнуть": { emoji: "🙂", customEmojiId: PREMIUM_EMOJI.heart, actionText: "кивнул" },
+"подмигнуть на прощание": { emoji: "😉", customEmojiId: PREMIUM_EMOJI.heart, actionText: "подмигнул на прощание" }
 };
 
 // Синхронизирует RP-команды с PREMIUM_EMOJI после загрузки env/JSON или автообучения через /emojiid.
@@ -1933,45 +2133,89 @@ const RP_REPLY_HINT = [
 // Отправляет RP-действие. Если customEmojiId заполнен, первый emoji в сообщении
 // отправляется через Telegram MessageEntity custom_emoji; иначе уходит обычный emoji.
 async function sendRpActionMessage(msg, command, commandData) {
+  if (!msg?.chat?.id || !msg?.from || !msg?.reply_to_message?.from) {
+    return;
+  }
+
   const userName = getTelegramName(msg.from);
   const targetName = getTelegramName(msg.reply_to_message.from);
-  const emoji = commandData.emoji || "🎲";
-  const selectionKey = `${msg.chat.id}:${msg.from.id}:${msg.reply_to_message.from.id}:${command}`;
-  const actionText = buildRpText(rpPresentationSelector, selectionKey, userName, commandData.actionText, targetName);
-  const text = `${emoji} | ${actionText}`;
-  const normalizedCommand = command.replace(/\s+/g, "");
-  const customEmojiId = rpPresentationSelector.choose([
-    commandData.customEmojiId,
-    RP_COMMAND_PREMIUM_EMOJI[command],
-    RP_COMMAND_PREMIUM_EMOJI[normalizedCommand],
-    RP_PREMIUM_EMOJI[emoji],
-    savedPremiumEmojiIds.rp?.[emoji]
-  ], `${selectionKey}:emoji`);
+  const emoji = commandData?.emoji || "🎭";
+  const actionText = commandData?.actionText || "выполнил действие с";
 
-  console.log("RP:", command, customEmojiId);
+  const selectionKey = [
+    msg.chat.id,
+    msg.from.id,
+    msg.reply_to_message.from.id,
+    command
+  ].join(":");
+
+  const text = `${emoji} | ${userName} ${actionText} ${targetName}`;
+
+  const normalizedCommand = String(command || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+
+  const customEmojiId = rpPresentationSelector.choose(
+    [
+      commandData?.customEmojiId,
+      RP_COMMAND_PREMIUM_EMOJI[command],
+      RP_COMMAND_PREMIUM_EMOJI[normalizedCommand],
+      RP_PREMIUM_EMOJI[emoji],
+      savedPremiumEmojiIds.rp?.[emoji]
+    ].filter(Boolean),
+    `${selectionKey}:emoji`
+  );
+
+  console.log(
+    "RP:",
+    {
+      command,
+      normalizedCommand,
+      customEmojiId: customEmojiId || "fallback",
+      from: msg.from.id,
+      target: msg.reply_to_message.from.id
+    }
+  );
+
+  const replyOptions = {
+    reply_parameters: {
+      message_id: msg.message_id
+    }
+  };
 
   if (customEmojiId) {
     try {
-      await bot.sendMessage(msg.chat.id, text, {
-        entities: [
-          {
-            type: "custom_emoji",
-            offset: 0,
-            length: emoji.length,
-            custom_emoji_id: customEmojiId
-          }
-        ],
-        reply_parameters: { message_id: msg.message_id }
-      });
+      await originalSendMessage(
+        msg.chat.id,
+        text,
+        {
+          ...replyOptions,
+          entities: [
+            {
+              type: "custom_emoji",
+              offset: 0,
+              length: emoji.length,
+              custom_emoji_id: customEmojiId
+            }
+          ]
+        }
+      );
+
       return;
     } catch (error) {
-      console.error("RP premium emoji error:", getErrorMessage(error));
+      console.error(
+        "RP premium emoji error:",
+        getErrorMessage(error)
+      );
     }
   }
 
-  await bot.sendMessage(msg.chat.id, text, {
-    reply_parameters: { message_id: msg.message_id }
-  });
+  await originalSendMessage(
+    msg.chat.id,
+    text,
+    replyOptions
+  );
 }
 
 const handledRpMessageIds = new Set();
@@ -6853,34 +7097,12 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  const commandText = (msg.text || "").trim().toLowerCase();
-  
-  console.log("RP TEXT =", commandText);
-  console.log("RP EXISTS =", !!RP_COMMANDS[commandText]);
-
-  const commandData = RP_COMMANDS[commandText];
-
-  if (commandData) {
-    if (!ensureCommandEnabled(msg, "action")) return;
-
-    if (!msg.reply_to_message?.from) {
-      bot.sendMessage(
-        msg.chat.id,
-        RP_REPLY_HINT,
-        { reply_parameters: { message_id: msg.message_id } }
-      );
-      return;
-    }
-
-    registerUserInChat({ chat: msg.chat, from: msg.reply_to_message.from });
-    await sendRpActionMessage(msg, commandText, commandData);
-    return;
-  }
-
   if (/^(?:смс\s*ид|sms\s*id|message\s*id)$/i.test(msg.text.trim())) {
     if (!ensureCommandEnabled(msg, "messageid")) return;
 
-    const targetMessageId = msg.reply_to_message ? msg.reply_to_message.message_id : msg.message_id;
+    const targetMessageId = msg.reply_to_message
+      ? msg.reply_to_message.message_id
+      : msg.message_id;
 
     bot.sendMessage(
       msg.chat.id,
