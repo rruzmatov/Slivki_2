@@ -1737,7 +1737,161 @@ const RP_COMMANDS = {
   "найти": { emoji: "🔍", customEmojiId: PREMIUM_EMOJI.rp_nayti, actionText: "нашёл" },
   "выдать алмаз": { emoji: "💎", customEmojiId: PREMIUM_EMOJI.rp_vydat_almaz, actionText: "выдал алмаз" },
   "выдать платину": { emoji: "🏅", customEmojiId: PREMIUM_EMOJI.rp_vydat_platinu, actionText: "выдал платину" },
-  "выдать легендарный лут": { emoji: "🧰", customEmojiId: PREMIUM_EMOJI.rp_vydat_legendarnyy_lut, actionText: "выдал легендарный лут" }
+  "выдать легендарный лут": { emoji: "🧰", customEmojiId: PREMIUM_EMOJI.rp_vydat_legendarnyy_lut, actionText: "выдал легендарный лут" },
+  // ===== Шлёпанье =====
+  "шлёпнуть": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул" },
+  "отшлёпать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал" },
+  "шлёпать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает" },
+  "шлёпнуть сильно": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "сильно шлёпнул" },
+  "отшлёпать жёстко": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "жёстко отшлёпал" },
+  "шлёпать по жопе": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает по жопе" },
+  "шлёпнуть по заднице": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул по заднице" },
+  "отшлёпать до красна": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал до красна" },
+  "шлёпать ладонью": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает ладонью" },
+  "шлёпнуть ремнём": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул ремнём" },
+  "отшлёпать ремнём": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал ремнём" },
+  "шлёпать лопаткой": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает лопаткой" },
+  "шлёпнуть по ягодицам": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул по ягодицам" },
+  "отшлёпать голую жопу": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал голую жопу" },
+  "шлёпать мокрую жопу": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает мокрую жопу" },
+  "шлёпнуть и сжать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул и сжал" },
+  "отшлёпать до стонов": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал до стонов" },
+  "шлёпать без остановки": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает без остановки" },
+  "шлёпнуть резко": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "резко шлёпнул" },
+  "отшлёпать медленно": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "медленно отшлёпал" },
+  "шлёпать сильно и грубо": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает сильно и грубо" },
+  "шлёпнуть по одной ягодице": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул по одной ягодице" },
+  "отшлёпать обе ягодицы": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал обе ягодицы" },
+  "шлёпать по киске": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает по киске" },
+  "шлёпнуть по пизде": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул по пизде" },
+  "отшлёпать по яйцам": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал по яйцам" },
+  "шлёпать по сиськам": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает по сиськам" },
+  "шлёпнуть по лицу": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул по лицу" },
+  "отшлёпать по губам": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал по губам" },
+  "шлёпать по бедрам": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает по бедрам" },
+  "шлёпнуть и раздвинуть": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул и раздвинул" },
+  "отшлёпать и прижать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал и прижал" },
+  "шлёпать стоя": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает стоя" },
+  "шлёпнуть через колени": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул через колени" },
+  "отшлёпать на кровати": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал на кровати" },
+  "шлёпать у стены": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает у стены" },
+  "шлёпнуть и держать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул и держит" },
+  "отшлёпать и тянуть волосы": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "отшлёпал и тянет за волосы" },
+  "шлёпать и кусать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпает и кусает" },
+  "шлёпнуть и лизнуть": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "шлёпнул и лизнул" },
+
+  // ===== Основные действия =====
+  "выебать": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал" },
+  "трахнуть": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул" },
+  "ебать": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт" },
+  "отодрать": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал" },
+  "засадить": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил" },
+  "вставить": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "вставил" },
+  "выебать жёстко": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "жёстко выебал" },
+  "трахнуть грубо": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "грубо трахнул" },
+  "ебать сильно": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт сильно" },
+  "отодрать глубоко": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "глубоко отодрал" },
+  "засадить до конца": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил до конца" },
+  "вставить резко": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "резко вставил" },
+  "выебать сзади": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал сзади" },
+  "трахнуть в жопу": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул в жопу" },
+  "ебать в пизду": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт в пизду" },
+  "отодрать в рот": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал в рот" },
+  "засадить в горло": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил в горло" },
+  "выебать без подготовки": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал без подготовки" },
+  "трахнуть насухую": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул насухую" },
+  "ебать мокрую": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт мокрую" },
+  "отодрать до слёз": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал до слёз" },
+  "засадить до стонов": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил до стонов" },
+  "выебать до оргазма": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал до оргазма" },
+  "трахнуть до кончины": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул до кончины" },
+  "ебать без остановки": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт без остановки" },
+  "отодрать быстро": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "быстро отодрал" },
+  "засадить медленно": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "медленно засадил" },
+  "выебать глубоко и жёстко": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "глубоко и жёстко выебал" },
+  "трахнуть стоя": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул стоя" },
+  "ебать на четвереньках": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт на четвереньках" },
+  "отодрать на спине": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал на спине" },
+  "засадить сбоку": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил сбоку" },
+  "выебать лицом вниз": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал лицом вниз" },
+  "трахнуть у стены": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул у стены" },
+  "ебать на столе": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт на столе" },
+  "отодрать на полу": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал на полу" },
+  "засадить на коленях": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил на коленях" },
+
+  // ===== Комбинации =====
+  "выебать и шлёпать": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал и шлёпает" },
+  "трахнуть со шлепками": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул со шлепками" },
+  "ебать и бить по жопе": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт и бьёт по жопе" },
+  "отодрать и отшлёпать": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал и отшлёпал" },
+  "засадить и шлёпнуть": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил и шлёпнул" },
+  "выебать шлёпая": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал, шлёпая" },
+  "трахнуть с шлепками": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул с шлепками" },
+  "ебать и шлёпать одновременно": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт и шлёпает одновременно" },
+  "отодрать после шлепков": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал после шлепков" },
+  "засадить после наказания": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил после наказания" },
+  "выебать наказав": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал, наказав" },
+  "трахнуть отшлёпав": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул, отшлёпав" },
+  "ебать докрасна": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт докрасна" },
+  "отодрать красную жопу": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал красную жопу" },
+  "засадить в шлёпаную": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил в шлёпаную" },
+  "выебать горячую задницу": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "выебал горячую задницу" },
+  "трахнуть после ремня": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул после ремня" },
+  "ебать после ладони": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "ебёт после ладони" },
+  "отодрать с синяками": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отодрал с синяками" },
+  "засадить с красными следами": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "засадил с красными следами" },
+
+  // ===== Кончить =====
+  "кончить внутрь": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кончил внутрь" },
+  "кончить на жопу": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кончил на жопу" },
+  "кончить на лицо": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кончил на лицо" },
+  "кончить в рот": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кончил в рот" },
+  "кончить на сиськи": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кончил на сиськи" },
+  "заставить глотать": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "заставил глотать" },
+  "держать внутри": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "держит внутри" },
+  "не вынимать": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "не вынимает" },
+
+  // ===== Контроль =====
+  "тянуть за волосы": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "тянет за волосы" },
+  "душить слегка": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "слегка душит" },
+  "кусать шею": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кусает шею" },
+  "царапать спину": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "царапает спину" },
+  "сжимать горло": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "сжимает горло" },
+  "связать": { emoji: "🔗", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "связал" },
+  "наручники": { emoji: "🔗", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "надел наручники" },
+  "кляп": { emoji: "🤐", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "вставил кляп" },
+  "повязка на глазах": { emoji: "🙈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "завязал глаза" },
+  "ошейник": { emoji: "🔗", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "надел ошейник" },
+  "поводок": { emoji: "🔗", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "надел поводок" },
+
+  // ===== Позы =====
+  "поза собаки": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "взял в позе собаки" },
+  "миссионерская": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "взял в миссионерской" },
+  "наездница": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "посадил сверху" },
+  "69": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "взял в позе 69" },
+  "раком": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "взял раком" },
+  "на четвереньках": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "поставил на четвереньки" },
+  "стоя": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "взял стоя" },
+  "у стены": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "прижал к стене" },
+
+  // ===== Доминирование =====
+  "как суку": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул как суку" },
+  "как шлюху": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул как шлюху" },
+  "как игрушку": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "использовал как игрушку" },
+  "как вещь": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "использовал как вещь" },
+  "без жалости": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул без жалости" },
+  "без пощады": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул без пощады" },
+  "с унижением": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул с унижением" },
+  "с приказами": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул с приказами" },
+  "с мольбами": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "трахнул под мольбы" },
+
+  // ===== Метки =====
+  "оставить метки": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил метки" },
+  "оставить следы": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил следы" },
+  "оставить синяки": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил синяки" },
+  "оставить укусы": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил укусы" },
+  "оставить засосы": { emoji: "💋", customEmojiId: PREMIUM_EMOJI.kiss, actionText: "оставил засосы" },
+  "оставить сперму": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "оставил сперму" }
 };
 
 // Синхронизирует RP-команды с PREMIUM_EMOJI после загрузки env/JSON или автообучения через /emojiid.
@@ -2583,26 +2737,6 @@ function getUserStatsText(user) {
     `📅 Регистрация: ${formatUserStatsDate(userStats.registeredAt)}`,
     `🕒 Последняя активность: ${formatUserStatsDate(userStats.lastActiveAt)}`
   ].join("\n");
-}
-
-const seenUsersInThisGroup = chatUsers.has(chatId) ? chatUsers.get(chatId).size : 0;
-const messagesInThisGroup = stats.chatMessagesToday?.[chatId] || 0;
-
-function formatUserStatsDate(timestamp) {
-  const value = Number(timestamp);
-
-  if (!Number.isFinite(value) || value <= 0) {
-    return "Нет данных";
-  }
-
-  return new Date(value).toLocaleString("ru-RU", {
-    timeZone: "Asia/Tashkent",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
 }
 
 function getUserStatsText(user) {
