@@ -2141,7 +2141,27 @@ const RP_COMMANDS = {
 "чпокнуть по жопе": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "чпокнул по жопе" },
 "чпокнуть сильно": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "сильно чпокнул" },
 "чпокнуть нежно": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "нежно чпокнул" },
-"чпокнуть и сжать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "чпокнул и сжал" }
+"чпокнуть и сжать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "чпокнул и сжал" },
+"засосать нежно": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "нежно засосал" },
+"засосать медленно": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "медленно засосал" },
+"засосать глубоко": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "глубоко засосал" },
+"отсосать с любовью": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отсосал с любовью" },
+"отсосать глядя в глаза": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "отсосал, глядя в глаза" },
+"взять в рот и смотреть в глаза": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "взял в рот и смотрит в глаза" },
+"облизать пальцы": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "облизал пальцы" },
+"облизать губы": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "облизал губы" },
+"полизать шею": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "полизал шею" },
+"полизать ушко": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "полизал ушко" },
+"сосать слюняво и громко": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "сосёт слюняво и громко" },
+"сосать до дрожи": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "сосёт до дрожи" },
+"сосать до оргазма": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "сосёт до оргазма" },
+"заставить сосать стоя на коленях": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "заставил сосать стоя на коленях" },
+"заставить отсосать до конца": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "заставил отсосать до конца" },
+"кончить глубоко в горло": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кончил глубоко в горло" },
+"кончить на губы": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кончил на губы" },
+"кончить на щёки": { emoji: "💦", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "кончил на щёки" },
+"заставить держать во рту": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "заставил держать во рту" },
+"не давать вынуть": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "не даёт вынуть" }
 };
 
 // Синхронизирует RP-команды с PREMIUM_EMOJI после загрузки env/JSON или автообучения через /emojiid.
