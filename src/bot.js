@@ -2141,7 +2141,7 @@ const RP_COMMANDS = {
 "чпокнуть по жопе": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "чпокнул по жопе" },
 "чпокнуть сильно": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "сильно чпокнул" },
 "чпокнуть нежно": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "нежно чпокнул" },
-"чпокнуть и сжать": { emoji: "🍑", customEmojiId: PREMIUM_EMOJI.hit, actionText: "чпокнул и сжал" },
+
 "засосать нежно": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "нежно засосал" },
 "засосать медленно": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "медленно засосал" },
 "засосать глубоко": { emoji: "😈", customEmojiId: PREMIUM_EMOJI.rp_ukusit, actionText: "глубоко засосал" },
